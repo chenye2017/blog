@@ -1,10 +1,3 @@
----
-title: PHP面试题
-date: 2019-02-21 10:50:35
-tags: [PHP,interview]
-categories: PHP
----
-
 收集一些总是考的面试题
 
 <!--more-->
@@ -123,152 +116,11 @@ sql 注入
 
 
 
-# PHP
-
-```
-PHP 位运算符 
-| 半个或
-& 同或
-^ 异或
-~ 取反 （其实最常见的就是error_reporting(E_ALL ~E_NOTICE)）
-3 | 5 7
-3 & 5 1
-```
-
-```
-字符串比较
-'111aa' == 111  // true
-```
-
-```
-setcookie(xxx);
-var_dump($_COOKIE);  // 空值，本次还没有携带cookie
-```
-
-```
-常用string ,arr 函数
-array:
-array_merge
-array_slice
-array_values
-array_keys
-array_columns
-is_array
-array_key_exists
-array_change_key_case
-array_diff
-array_intersect
-array_fill
-array_sum
-array_map
-array_reduce
-array_reverse
-key
-current
-next
 
 
-string:
-explode
-substr
-strpos
-preg_split
-preg_match
-strstr
-sort
-rsort
-asort
-arsort
-ksort
-krsort
-usrot
-```
-```
-array_merge 和 +  的区别
-+ 同key, 前面覆盖后面 （index 或者 关联）
-merge 关联后面覆盖前面，数字索引直接扩展开了 // $a = [1 =>2]; $v = [1 => 3]; array_merge($a,$v); 输出 [2, 3]; 重新排序
-
-在写代码的时候，如果我们确定key 不一样，可以考虑下 +， 因为merge 会把数字索引重新排序，这个可能是我们不想看到的
-```
-
-```
-php7新特性
-
-1.throwable 分成 error 和 exception，都可以被捕获
-2.太空舱运算符， 一般usort 里面排序
-3.三目运算符的缩写， ??
-4.define可以定义常量数组 (以前好像只有const 可以，const) //  const 和 define 的区别，但感觉实际还是define 用的比较多 https://www.jianshu.com/p/a38b81433183
-5.返回值也能严格要求返回类型
-6.传入参数类型声明的扩展，比如int
-7.命名空间合并
-8.closure call 替代bindTo 更加的方便
-```
-
-```
-php7为什么相较于php5性能有很大提升？
-减少内存分配次数，优化底层zval 数据结构(64 位减少到24 位)，字符串解析的优化，缓存hash
-```
-
-```
-php垃圾回收机制
-1、以php的引用计数机制为基础（php5.3以前只有该机制）（refcount 是1 的时候就删除， is_ref 是否是引用类型）
-2、同时使用根缓冲区机制，当php发现有存在循环引用的zval时，就会把其投入到根缓冲区，当根缓冲区达到配置文件中的指定数量后，就会进行垃圾回收，以此解决循环引用导致的内存泄漏问题（php5.3开始引入该机制）（为了防止子变量中引用父变量，父变量unset 之后refcount 到不了0 一直得不到回收）
-其实最简单的防止那种慢性内存溢出的方式就是php-fpm 的连接重启(当然你要是一次性消耗了太多内存，还是会内存溢出的)
-```
-
-```
-如何解决php内存溢出问题（phpexcel中经常出现，第二个很管用）
-1. 增大 PHP 脚本的内存分配（这个不能一劳永逸）
-2. 变量引用之后及时销毁
-3. 将数据分批处理
-```
-
-```
-$z = 0.58;
-var_dump(intval($z * 100));
-```
-
-答案是 57，所有语言对于小数的存取都是不精确的， 0.58其实是0.57999999，而且intval() 总是从遇到第一个不是数字开始截取，导致了0.57，比较通用的方法是转成别用intval, 或者用数学函数，bcmath扩展计算
-
-```
-cookie 和 session 的 区别
-cookie 更像一个钥匙，因为没有加密，所以客户端可以查看和随意更改cookie的数据，cookie 对应的 session 才是服务端真正存储的序列化数据，
-php 中 cookie 默认名称是 phpsessid , 通过这个值，服务端php能识别客户端对应的用户
-
-什么是jwt， jwt 和 cookie, session 的区别
-jwt 是一种token 的实现方式，由base64 处理过，因为base64可以放解码，所以不要存储重要信息，存放一些基本的辨识用户的信息就好了。
-他是三段组成的，第一段是签名的加密算法，第二段是用户数据（载体）, 第三段是前面数据的签名，防止用户数据被修改。
-jwt相较于cookie 和session ,不需要服务端存储用户的基本信息，token下发到client ,完全由客户端保存, 可以防止csrf 攻击。但是jwt 下发之后除非做特殊处理比如服务端，否则不能失效，蛮尴尬的。
-```
-```
-spl_autoload_register和 _autoload 的区别
-现在的自动加载已经不用_autoload 了，这个只支持一个方法，现在一般用spl_autoload_register, 或者全部用composer， 但composer本质上还是spl_autload_register,他可以支持多个函数
-```
 
 
-```
-判断一个日期是否合法
-// 思路
-把一个日期转用strtotime 转换成时间戳再通过 date(), 转换成标准时间，和原先的日期比对是否相同，相同就合法，不同不合法
-// 注意：错误的时间date 也能转换，只是可能转换成1970 这样的时间
-// 字符串的比对比较耗时
-```
 
-```
-单引号，双引号区别
-单引号解析变量
-双引号不解析变量
-```
-```
-include require 区别
-include 包含文件不存在 warning
-require 错误
-required_once
-```
-```
-中文截取字符串
-mb_substr
-```
 
 
 ```
@@ -291,129 +143,13 @@ mb_substr
 装饰模式（laravel 的路由，核心 array_reduce）
 ```
 
-```
-常用的魔术方法
-__construct  类初始化
-__destruct  对象销毁的时候
-__call  调用的方法不能访问 （redis 类封装的时候很好用）
-__callStatic  调用的静态方法不能访问
-__get  获取的属性不能访问
-__set  设置的属性不能访问
-__isset  isset empty 不能访问的属性
-__unset unset 不能访问的属性
-__sleep  序列化一个对象的时候
-__wakeup  反序列一个对象的时候
-__clone 对象（作为两个实体的存在)
-__invoke 调用类实例像调用方法那样自动触发，像closure类自带这个方法，php中所有的匿名函数默认都是closure的实例，所以我们执行保存匿名函数的变量自动执行了这个方法
-
-魔术变量
-__CLASS__  类名
-__LINE__  行号
-__FILE__  文件名
-__METHOD__ 类中方法名
-__FUNCTION__ 普通方法名
-```
-
-```
-php 错误信息控制
-error_reporting(E_ALL)
-```
 
 
 
-```
-trait Singleton {}
-多继承的实现
-
-class Db
-{
-  use Singleton;
-}
-```
-
-```
-抽象类只能继承， extend ，接口可以实现多个，比如我想我这个类拥有foreach, 之类的功能， implement
-
-abstract 抽象类 （基本很少用）
-抽象类不能实例化
-抽象类中方法可以有方法体，没有方法体的只能定义abstract
-
-abstract 介于 class 和 interface 之间
-
-interface 接口
-interface 中不能用变量,但是可以有常量
-interface 中方法的访问权限只能是public, 不能是protected或者prviate, 方法不能有方法体，
 
 
-抽象类和接口中但凡没有方法体，子类必须去实现
-```
-
-```
-static ,延迟静态绑定，
-self, parent 调用的方法的时候都是以当前类为标准,
-static 根据实际调用对象，每当到了static 的 时候调用的上一个确定了调用类的对象方法 (parent self 都不能改变调用对象)（优先调用自己的，如果自己的不能调用，调用父类的）（注意延迟调用的一定要是静态的static）
 
 
-class A {
-
-    public static function who()
-    {
-        echo __CLASS__;
-    }
-    
-    public static function test()
-    {
-        static::who();
-    }
-
-}
-
-class B extends A{
-    protected static function who()
-    {
-        echo __CLASS__;
-    }
-}
-
-B::test(); // 调用不了， 在 a 中调用b的protected
-
-
-class A {
-    public static function foo()
-    {
-        static::who();
-    }
-    
-    public static function who()
-    {
-        echo __CLASS__;
-    }
-}
-
-class B extends A {
-    public static function test()
-    {
-        A::foo();
-        parent::foo();
-        self::foo();
-    }
-    
-    public static function who()
-    {
-        echo __CLASS__;
-    }
-}
-
-class C extends B {
-    public static function who() {
-        echo __CLASS__;
-    }
-}
-
-C::test();
-
-A C C
-```
 
 ```
 防止sql 注入
@@ -490,73 +226,12 @@ Time per request  客户端等待时间
 Time per request 服务端等待时间
 ```
 
-```
-yield  感觉就类似分页，有效减少内存的消耗（大数据量一次性读入内存吃不消），注意yield 的使用和数组还是有区别的.
-就相当于我们值读入部分数据到yield 中，我们还得foreach yield 抛出的数据（iterator 实现了迭代器，所以可以循环），循环去插入 取出yield 中的数据
 
-function test() {
-  for($i = 1; $i<5; $i++) {
-      yield $i;
-  }
-}
-$data = test();
-foreach ($data as $value) {
-    var_dump($data->current(),$value);
-} 
-exit;
-```
+
+
 
 ```
-自带的接口
-iterator // 可以循环，下面的那些方法都是为了foreach能正确数据准备的
-class test implements Iterator
-{
-    public $arr = [];
-    public $keyArr = [];
-    public $keyP = 0;
-    
-    public function __construct($arr)
-    {
-        $this->arr = $arr;
-        $this->keyArr = array_keys($arr);
-    }
-    
-    public function rewind()
-    {
-        // TODO: Implement rewind() method.
-        reset($this->arr);
-        $this->keyP = 0;
-    }
-    
-    public function current()
-    {
-        // TODO: Implement current() method.
-        return pos($this->arr);
-    }
-    
-    public function next()
-    {
-        // TODO: Implement next() method.
-        $this->keyP++;
-        return next($this->arr);
-    }
-    
-    public function key()
-    {
-        // TODO: Implement key() method.
-        return $this->keyArr[$this->keyP];
-    }
-    
-    public function valid()
-    {
-        // TODO: Implement valid() method.
-        return isset($this->keyArr[$this->keyP]);
-    }
-}
-```
-
-```
-php 进程间通信的方式
+进程间通信的方式
 
 第三方，比如redis
 消息队列， 也可以属于第三方
@@ -567,67 +242,7 @@ socket 文件
 tcp
 ```
 
-```
-几个预定义接口 spl标准类库
-ArrayAccess , 让类可以类似数组方式访问
-Countab  , 让类可以被 count()
-iterator  让对象能循环，几个必须实现的方法（current, 当前key, key, 就是 key 的名称， next 往下走， rewind, 重置，valid 是否有效，本身php 的数组就包含上述的实现，$arr[$key], key,next, reset, isset）
-iteratorAggregate 感觉就是方便的创造一个迭代器比较方便（官网上直接调用spl 的一个标准库, ArrayIterator(这是类，不是预定义接口), 数组对象转成 Iterator 方便）
-```
 
-```
-php 多进程写入同一个文件
-file_put_contents() // 添加第三个参数ex_lock
-
-对文件加锁，并对锁设置超时时间（类似给redis 那种锁 sex 锁， setnx 不能同时设置锁的时间，不具有原子性，这里面的锁，其实就是一个key-value）
-
-$resource = fopen('./tmp.log');
-$try = 0;
-while(!flock($resource, LOCK_EX) && $try != 100)
- {
-	$try++;
-} 
-if ($try == 100) {
-  return false; // 测试太多失败
-}
-
-
-fwrite($res, 'ceshi');
-fclose($res); // 一般就能删除锁， 或者 flock($resource, UN_LOCK);
-return true;
-
-关于php这种锁，进程结束了就自动消失了，文档上说是脚本结束了，其实是一个意思（想一下我们用redis实现的锁，也是这样的，redis要是挂了，锁是不是没了）
-（当我用用了排它锁，我们再打开文件就是空的）
-(感觉写文件也不是直接往磁盘文件中写，而是写入一个缓存中，之后合并，因为当我用排它锁锁定一个文件的时候，fwrite 能立刻写入成功，虽然此时文件还没有修改)
-```
-
-
-
-
-
-# Laravel
-
-```
-laravel 调优
-1. 开启Opcache
-   2.关闭debug
-   3.缓存配置 php artisan config:cache
-   4.缓存路由 php artisan router:cache
-   5.类映射加载优化 php artisan optimize
-   6.根据需要只加载必要的中间件
-```
-
-```
-laravel 生命周期
-```
-
-```
-loc ,facade, contract, 服务提供者是什么
-```
-
-```
-laravel 和 其他框架的区别
-```
 
 
 

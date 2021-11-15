@@ -238,6 +238,10 @@ mysql 的事务如何优化提升速度
 
   ```
   https://juejin.cn/post/6860252224930070536
+  
+  binglog
+  redolog
+  undolog
   ```
 
 

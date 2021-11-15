@@ -24,7 +24,7 @@
 * map 遍历的时候append， 可以读取到么
 
   ```
-  map 是无序的，随机从一个bucket（也就是index） 开始遍历，不会像 slice 那样有固定的次数
+  map 是无序的，随机从一个bucket（也就是index），故意的， 开始遍历，不会像 slice 那样有固定的次数
   
   可能读取到，也可能读取不到，随机（如果插入的元素在当前遍历到的元素后面，就能输出）
   
@@ -47,7 +47,7 @@
   
   m1["test"] = S1{Name: "test"}
   m1["test1"] = S1{Name: "test1"}
-  m1["test1"].Name = "TEST"
+  m1["test1"].Name = "TEST" // php 中经常这么编写
   
   php 中经常这样编写。 也不知道php 中arr 怎么实现的。 go 中test1 会因为hash因子大于 6.5 重新hash， 落到不同的bucket 中
   
@@ -74,6 +74,7 @@
   // interface 虽然是引用类型 ，但很奇怪，不像 slice， map， channel 那样会因为对其改变而改变。
   // interface ===> iface (包含方法), eface (不包含方法)
   // 感觉interface比较大小的时候才能显示自己是引用类型的问题，比如两个 errors.New("11") errors.New("11") 大小不相等
+  // 这个 error 错误比较很重要，因为类似redis 查询的时候都会用到
   
   
   https://www.veaxen.com/golang%e6%8e%a5%e5%8f%a3%e5%80%bc%ef%bc%88interface%ef%bc%89%e7%9a%84%e6%af%94%e8%be%83%e6%93%8d%e4%bd%9c%e5%88%86%e6%9e%90.html
@@ -129,11 +130,12 @@
     
       // 指针类型 调用接收者也是指针类型的方法
       p2.GetAge()
-      fmt.Println(p2.GetAge())
+      
   }
   
   // 上面那块代码虽然是能直接执行的  !!!!
   //但是如果我们定义了 interface 类型， 我们的 p 变量是没有拥有 *p 的方法的。 虽然  *p 包含了 所有 p 的方法
+  // p 不能自动生成*p 的方法，但可以执行
   ```
 
 ![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211003170536.png)
@@ -324,6 +326,7 @@
   内存逃逸从栈上逃逸到堆上 
   1.地址类型的返回，
   2.或者大的数据类型
+  3.interface类型
   
   gc 回收的是堆上的对象。
   ````
@@ -392,7 +395,7 @@
 * 都是加锁，为什么用 channel （通信）去代替共享内存
 
   ```
-  channel 来数据的时候 ， recvq 链表中有等待goroutine， 会把来的数据直接copy 到对应goroutine的的栈中，而不需要加锁操作。（感觉是因为队列这个属性已经满座了fifo，所以不用加锁）
+  channel 来数据的时候 ， recvq 链表中有等待goroutine， 会把来的数据直接copy 到对应goroutine的的栈中，而不需要加锁操作。（感觉是因为队列这个属性已经满足了fifo，所以不用加锁）
   ```
 
 * 并发和并行的区别
@@ -424,8 +427,8 @@
 * go 中的锁有哪些
 
   ```
-  1. 互斥锁 （多次 unlock 造成的 panic 竟然 锁不住）
-  2. 读写锁 （这两种都是 悲观锁）
+  1. 互斥锁 （多次 unlock 造成的 panic 竟然 锁不住。因为也是计数型型号量，所以到了 -1 会报错）
+  2. 读写锁 （这两种都是 悲观锁）。读锁可以多次lock， 用的是计数型型号量。到了-1会报错
   ```
 
 * Goroutine 的状态
@@ -474,9 +477,6 @@
   
   这种经常也是最安全的读法，channel 。如果close 了，读取到默认值。
   
-  
-  
-  
   2. for tmp := range c   这种如果 channel 没有被close， 会被阻塞住。
   
   如果 close了，不阻塞， 读取不到值。
@@ -492,7 +492,7 @@
   这种正常情况下没有问题， channel 读取不出来数据会被阻塞，但是当channel close 之后，会一直能不间断的读取到数据，需要注意，一定要判断 value, comma := <- chan  ,判断这个数据是否有用
   
   ```
-
+  
 * Var 定义的变量 （make , new ,  var , :=  对比）
 
   ```
@@ -569,13 +569,6 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   ```
 
-* Go 的 select 中default 作用
-
-  ```
-  当 select 中的其他条件分支都没有准备好的时候，`default` 分支会被执行。
-  为了非阻塞的发送或者接收，可使用 default 分支
-  ```
-
 * go 的 defer， （结合面试题看）
 
   ```
@@ -624,7 +617,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   func f1() (r int) {
       defer func() {
-          r++
+          r++  // go 和 php 不一样，这样不能直接使用，和上面返回的r 是同一个变量
       }()
       return 0
   }
@@ -724,11 +717,11 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   p process 逻辑
   
-  gobal 队列中取g， 会造成严重的所竞争，也会时区 cpu亲和性。
+  gobal 队列中取g， 会造成严重的锁竞争，也会失去 cpu亲和性。
   
   生成多个本地队列 runtime设置大小 ，每个本地队列上绑定一个p， m 和 g 直接通过p 关联， m通过p 取本地队列的g （本队队列最大256，如果取完了从global 队列取，如果也没有，去本地队列中偷取一半）。
   
-  g的堵塞 （io 堵塞，channel 等待）。都不会切换m， 比如 io 堵塞会把 g 放到netpol 中，类似多路复用，如果数据准备好，又会回到队列尾部等待执行。
+  g的堵塞 （io 堵塞，channel 等待）。都不会切换m， 比如 io 堵塞会把 g 放到netpoll 中，类似多路复用，如果数据准备好，又会回到队列尾部等待执行。
   
   syscall 导致的堵塞， g 和 m 脱离 p， 执行完，g 回归队列，m 回到空闲 m 队列。
   ```
@@ -808,9 +801,10 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   ```
   https://www.tizi365.com/archives/83.html
   
-  通过监听 信号channel
+  接受linux  usr2 信号
   
-  监听到重启的信号，启动一个新的进程监听处理之前的socket， 老的进程不接受请求，处理完任务退出。
+  启动一个新的进程处理。新的进程启动好后，给老进程发送信号，通知老进程结束。老进程不接受流量，只是处理自己的任务，新的进程接受流量， 处理新的任务。
+  
   ```
 
 * channel 底层数据结构
@@ -1066,7 +1060,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 
   
 
-* 怎么便面缓存击穿，还有其他什么方法
+* 怎么解决缓存击穿，还有其他什么方法
 
   ```
   1.雪崩（ttl + random key）
@@ -1100,7 +1094,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   serverstub （接受链接，反序列化请求参数，处理相应请求）
   
-  复杂均衡：
+  复杂均衡：轮训，随机，根据url hash，根绝来源ip hash, 加权
   
   注册中心：接受服务注册，提供服务发现 consule
   
@@ -1146,6 +1140,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 * 给定一个整数数组 nums 和一个目标值 target，请你在该数组中找出和为目标值的那两个整数，并返回他们的数组下标
 
   ```
+  遍历，存储到map 中
   ```
 
 * 给定两个数组，编写一个函数来计算它们的交集、以及差集（交集简单，重点在差集上）。leetcode 上只讲了交集没讲差集
@@ -1168,6 +1163,8 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 * 往一个对象里写入 10w 条数据，怎样保证数据的准确性（chan、mutex 之类的胡扯就对了）
 
   ```
+  atomic 自增
+  sync.Mutex 互斥锁
   ```
 
 * 闭包的注意事项
@@ -1205,7 +1202,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 * 空结构体
 
   ```
-  没有field 的结构体， 生成的时候空间地址一定
+  没有field 的结构体， 生成的时候空间地址一定  struct{} 
   
   空结构体添加到结构体中，只要不是在最后一个field， 都不占用空间，如果是最后一个field 会需要进行内存对齐，占用空间
   
@@ -1217,7 +1214,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 * 内存对齐是什么
 
   ```
-  1.cpu 读取数据不是一个字节一个字节读取的，比如一次性读取4 个字节或者8个字节， 减少类似粘包，分包的那种问题。
+  1.cpu 读取数据不是一个字节一个字节读取的，比如一次性读取4 个字节或者8个字节， 减少类似粘包，分包的那种问题。32位机器和64位机器。这样读取也能保证原子性操作。
   2.不同数据类型对齐长度不一样，会根据下一个元素的类型和整体（比如struct）进行padding。
   ```
 
@@ -1989,13 +1986,6 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   // 数组不会rehash ，所以没有什么问题
   ```
 
-* 已经关闭的chan 读写， 会怎么样
-
-  ```
-  读 关闭chan，  元素 ， false
-  写 关闭chan， panic
-  ```
-
 * 进程，线程 和 协程的区别
 
   ```
@@ -2013,7 +2003,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   2、而且对于多核情况下，如果协程的切换都发生在一个cpu 上执行，线程的切换在多个cpu上执行， 消耗大。（协程间不需要加锁，因为本质上协程是在一个线程中切换的）https://www.v2ex.com/t/387596​， 协程不用加锁的解释，少场景
   3.协程的切换只需要把 cpu 的寄存器上内容切换到上次执行的地方，线程包含的资源更多，比如协程切换不用管线程共享的栈内存，但线程间切换就得管。
   ```
-  
+
 * go 协程调度
 
   ```
