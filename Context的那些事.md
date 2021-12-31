@@ -1,7 +1,12 @@
 之前面试的时候会被问到context 的几个问题。
 
-1. context 是什么类型 ? 
+```
+1. context 是什么类型 ?  interface, 实现的有 valueCtx, cancelCtx, timerCtx
 2. context 的取消是怎么实现的？父context 取消能取消子context吗？子context取消能取消父context吗？父context 取消子context 需要做什么才能实现自己取消操作吗？
+遍历 child map， 挨个调用 cancel。
+父context 能取消子context，子context 不能取消父context， 只能把自己从父 context 的 child map 中删除。
+所有 context 的取消都要监听 信号channel， c.Done(), 主动触发
+```
 
 
 
