@@ -39,4 +39,19 @@ go越来越流行了，加上公司的业务需求，迫使我必须得开始学
 
 
 
+5.关于mac下开发go 环境安装遇到的几个问题。
+
+* 首先是我们通过命令行修改 Go111module, goproxy, goprivate 这几个环境变量之后，我们还需要在goland 中再配置一次
+
+* 我们通过 export 环境变量这种方式，只能在当前窗口中生效，我们需要 编辑 /etc/profile 文件让环境变量永久生效。mac下因为zsh的问题，我们需要修改 ~/.zshrc , 加上 source /etc/profile
+
+* go mod 关于引入私有仓库，我们首先要配置 goprivate 私有仓库地址，比如 gitlab.xxx.com, 还需要配置 git 方式替代 https 方式, 编辑 ~/.gitconfig
+
+  ```
+  [url "git@code.xxx.cn:"]
+          insteadOf = https://code.xxx.cn/
+  [url "git@code.xxx.cn:"]
+          insteadOf = http://code.xxx.cn/
+  ```
+
 以上就是总结的 go 环境安装，完结~~
