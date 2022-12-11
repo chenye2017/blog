@@ -1,0 +1,22 @@
+* 安装brew 
+
+  ```
+  /bin/zsh -c "$(curl -fsSL https://gitee.com/cunkai/HomebrewCN/raw/master/Homebrew.sh)"
+  ```
+
+* 安装破解软件
+
+  ```
+  https://www.macwk.com/soft/all/s-git/p1
+  ```
+
+* 关于bash
+
+  ```
+  mac 现在用的都是zsh， 不是 bash 了， 有个优化的软件 oh my zsh 很好用，推荐装一下。
+  命令行工具用的是 iterm2
+  
+  mac 因为用了zsh， 所以我们比如就算在 /etc/profile 中export 了环境变量，也不能生效，需要 在~/.zshrc 中加入 source /etc/profile 这个，以后就可以直接在 /etc/profile 中修改了
+  ```
+
+  
