@@ -1,13 +1,35 @@
 * go 语言遇到的坑
 
   ```
-  1.slice 提前声明后， make([]int, 5). append 导致的元素 0 填充， 应该改成 make([]int, 0, 5)
-  2.slice 切片， []int{}[0:4], 影响自身
-  3.for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）
-  4.interface 比较问题。（和 nil 的比较，两个元素的比较）
-  5. 并发问题 （race）
-  6. go routine panic 没有捕获到 导致web server 受影响问题
-  7.cannot use names (type []string) as type []interface {} in argument to printAll。 es 的 terms 查询条件
+  1.slice  相关问题
+  make([]int, 5), len是5， 被0元素填充
+  只想防止扩容， 应该改成 make([]int, 0, 5)
+  
+  slice 三个属性组成，
+  数组指针，
+  len 实际占用大小， 
+  cap 容量。
+  
+  
+  slice 切片， []int{}[0:4], 影响自身， 此时并没有生成新的数组，指针只是移动了位置，之前指向数组第一个元素，现在指向的是切片开始的元素。
+  
+  
+  2. for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）（黑金宝盒问题类似，闭包中使用的变量是外部改变的变量，而没有用传入的方法，类似defer 执行）
+  
+  
+  3.interface 比较问题。（和 nil 的比较，两个元素的比较）（不明朗）
+  
+  
+  4. 并发问题 （race）
+  
+  
+  5. go routine panic 没有捕获到 导致web server 受影响问题. 而且还没有答应panic 堆栈位置，利用 address2line, 查询是哪一行代码出了问题
+  
+  
+  6.cannot use names (type []string) as type []interface {} in argument to printAll） 
+  es 的 terms 查询条件。（不明朗）
+  
+  interface 参数可以被 string 等很多类型传入，但是 []interface 不能直接用 []string, 需要主动构造[]interface
   ```
 
   
@@ -17,28 +39,40 @@
   ```
   不会，
   https://blog.csdn.net/wohu1104/article/details/115496718
-  这个for range 其实就是 for i:=0； i< len(arr); i++ 的封装
-  arr 的len 在循环的时候就确定了。
+  
+  这个for range 其实就是 
+  
+  arrCopy = arr
+  for i:=0； i< len(arrCopy); i++ 的封装
+  循环的次数在循环开始的时候就确定了
   ```
+
+  
 
 * map 遍历的时候append， 可以读取到么
 
   ```
+  map 的遍历没有次数限制
+  https://segmentfault.com/a/1190000023477520
+  
   map 是无序的，随机从一个bucket（也就是index），故意的， 开始遍历，不会像 slice 那样有固定的次数
   
   可能读取到，也可能读取不到，随机（如果插入的元素在当前遍历到的元素后面，就能输出）
   
-  同理 delete ，也是可能读取到，也可能读取不到
   ```
 
-* map 可以边遍历边删除么
+  
+
+* map 可以边遍历边删除么 
 
   ```
   同一个协程中可以的。
-  不同的协程中会报冲突
+  不同的协程中会报冲突 （并发不安全，可以用sync map）
   ```
 
-* map 元素取地址
+  
+
+* map  struct 类型value 修改  （不明朗）
 
   ```
   不可以， 会rehash， key => value 地址 ，可能会变动
@@ -49,12 +83,25 @@
   m1["test1"] = S1{Name: "test1"}
   m1["test1"].Name = "TEST" // php 中经常这么编写
   
-  php 中经常这样编写。 也不知道php 中arr 怎么实现的。 go 中test1 会因为hash因子大于 6.5 重新hash， 落到不同的bucket 中
+  
+  m1 := make(map[string]*S1)
+  m1["test"] = &S1{Name: "test"}
+  m1["test1"] = &S1{Name: "test1"}
+  m1["test1"].Name = "TEST" //
   
   slice 就可以这样用
+  
+  
+  issure: https://github.com/golang/go/issues/3117
+  问题原因不明，主要是
+  m1[int]int
+  m1[int] = 1 这种就可以直接赋值，为啥struct 不可以。
+  目前只知道的是解决办法
   ```
 
-* map 的比较
+  
+
+* map 的比较  （不明朗）
 
   ```
   map 本身不能比较，deep equal   （不能用 == ）
@@ -67,29 +114,77 @@
   （struct 如果不包含 map 这些不可以比较的元素，他就是能比较的）
    
   ```
+
   
+
 * go 中关于interface 解释
 
   ```
-  // interface 虽然是引用类型 ，但很奇怪，不像 slice， map， channel 那样会因为对其改变而改变。
+  // interface 是引用类型。  
   // interface ===> iface (包含方法), eface (不包含方法)
+  // 并不是说 iface 或者 eface 是引用类型，而是因为
+  iface {
+   itab uintptr
+   data uintptr
+  }
+  
+  eface {
+   _type uintptr
+   data uintptr
+  }
+  
+  包含的第一个属性是 引用类型，类似 slice 的说法。
+  
+  // 本质上和 map -》 hmap 不一样， map 取得是 hmap 的地址类型，上面的验证发放可以通过 unsafe 去验证
+  
+  // 获取 map 的 len
+  hmap 
+  {
+   count int
+  }
+  
+  m := map[int]int{11:10}
+  len := **(**int)(unsafe.Pointer(&m))
+  
+  
+  // 获取 slice 的len
+  slice 
+  {
+   data uintptr
+   len int
+   cap int
+  }
+  
+  arr := []int{1,2}
+  len := (*int)(unsafe.Pointer)(uintptr((unsafe.Pointer(&arr) + 8))
+  
+  
   // 感觉interface比较大小的时候才能显示自己是引用类型的问题，比如两个 errors.New("11") errors.New("11") 大小不相等
-  // 这个 error 错误比较很重要，因为类似redis 查询的时候都会用到
+  
+  // 这个 error 错误比较很重要，因为类似redis 查询的时候都会用到， redis.ErrNil, 所以比较的时候都是对比 package 里面定义的变量
   
   
   https://www.veaxen.com/golang%e6%8e%a5%e5%8f%a3%e5%80%bc%ef%bc%88interface%ef%bc%89%e7%9a%84%e6%af%94%e8%be%83%e6%93%8d%e4%bd%9c%e5%88%86%e6%9e%90.html
+  
+  看了上面的文章，发现要真的是 errors.New("11") == errors.New("11") 如果为true 的话，那就完了。因为error 生成的时候又不会全局检查，万一一样了。
   
   没有方法的interface , 包含元素类型 和 元素的实际存储位置，只有二者都相等，我们才能认为2个interface 相等。
   
   同理 interface 和 nil 比较大小，也就是只有 type 和 value 都等于 nil 的时候我们才能认为他是 nil
   
+  
   https://mp.weixin.qq.com/s/F9II4xc4yimOCSTeKBDWqw
   
-  煎鱼的这篇文章很好的诠释了工作中遇到的问题。对于结构体指针类型，我们可以直接用nil 比较。
+  煎鱼的这篇文章很好的诠释了工作中可能不小心遇到的问题。
+  
+  对于结构体指针类型，我们可以直接用nil 比较。
   
   对于 interface （error） 类型，我们要结合 type 和 value 一起比较
   
-  以上interface 的比较，就遇到之前在做 redis ErrNil 错误的对比，注意ErrNil 是我们申明的一个变量，方法里面我们使用这个变量的时候，直接return 这个包级别的变量，不能根据 message 再重新生成，否则不等于
+  
+  以上interface 的比较，就遇到之前在做 redis ErrNil 错误的对比，注意ErrNil 是我们申明的一个变量，方法里面我们使用这个变量的时候，直接return 这个包级别的变量，不能根据 message 再重新生成，否则不等于 （临时生成的变量地址，还外抛， 野指针）
+  
+   
   
   go 中interface 容易遇到的问题：
   https://sanyuesha.com/2017/07/22/how-to-understand-go-interface/
@@ -133,43 +228,73 @@
       
   }
   
-  // 上面那块代码虽然是能直接执行的  !!!!
+  // 上面那块代码虽然是能直接执行的  !!!! （因为语法糖， 而不是 生成了对应的发放）
   //但是如果我们定义了 interface 类型， 我们的 p 变量是没有拥有 *p 的方法的。 虽然  *p 包含了 所有 p 的方法
-  // p 不能自动生成*p 的方法，但可以执行
+  // p 能自动生成*p 的方法， 但是 *p 的方法不能自动生成 p。
   ```
 
-![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211003170536.png)
+​     ![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211003170536.png)
+
+*  上图显示不要把 引用类型和 interface 类型和nil 对比弄混了！！！interface 的对比除了值以外，还要对比type
 
 ​     ![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211012182635.png)
+
+
 
 * map 的两种get
 
   ```
   v, ok := m1["name"]
-  c, _ := <-chan
-  
-  同理channel 的两种get
-  注意，获取到元素的时候，不管 channel 是否关闭，都是true， 其实就是标志这个数据不是init 数据，同理map
-  
-  t, _ := m1.(int) // 安全断言，通过 comma 判断断言是否正确，如果断言错了， t 是该类型零值
+  // ok 主要告知到底有没有这这个key
+  // v 取不到值就是默认值，和ok 本身并没有太大关系 （断言的时候 ok 可以安全断言，但是map 取值的时候，如果不想知道到底有没有这个key， 这个ok 可以直接忽略）
   
   ```
+
+  
+
+* channel 的读取
+
+  ```
+  c, bool := <-chan
+  
+  注意，channel中有元素的时候，不管 channel 是否关闭，都是true， 其实就是标志这个数据是不是init data（这块可以结合源码看一下）
+  
+  就是这个标志位不会实时根据channel 是否关闭，而是在读完所有数据之后，如果关闭了，channel 不会阻塞，可以返回值，否则是阻塞。
+  ```
+
+
+
+* 断言
+
+  ```
+  t, _ := m1.(int) // 安全断言，通过 comma 判断断言是否正确，如果断言错了， t 是该类型零值
+  // 如果不用ok， 断言错了，会panic
+  ```
+
+  
 
 * map 是线程安全的吗
 
   ```
   不是，属于临界资源，没有加锁。
   只有一个标志位， 并发读写的时候会panic （throw 错误）。
+  
   channel 是线程安全的，他的struct 结构体中包含一个sync.Mutex 锁
+  
   slice 也非线程安全
   string 也非线程安全。
+  int 这些但凡没有 锁的都是线程不安全，需要用 atomic包。（复习一下 atmoic）
   ```
 
-* map 的遍历过程
+  
+
+* map 的遍历过程  (不明朗，看下map 的底层数据结构，看下map 的for range 代码)
 
   ```
   随机数--》哪个bucket (index) 开始遍历-- 》key(8个) -》overflow -》查询value
   ```
+
+  
 
 * map 中key 无序
 
@@ -177,17 +302,23 @@
   开始遍历的 bucket 不一定从哪个开始
   ```
 
-* float 类型可以作为map key吗
+  
+
+* float 类型可以作为map key吗 (不明朗)
 
   ```
   可以，但是float 存在精度问题
   ```
 
-* map 的赋值过程是怎么样的
+  
+
+* map 的赋值过程是怎么样的 （不明朗）
 
   ```
   并发检测 --》是否正在扩容（rehash过程中）--》查询key -》是否hash 冲突--》overflow查询--》count（包含 key 的总数）修改--》是否要overflow
   ```
+
+  
 
 * Map 怎么实现顺序读取
 
@@ -204,11 +335,13 @@
 * go 引用类型
 
   ```
-  map
-  slice
+  nil 是值，代表初始值。这个变量如果是 nil 还是能取到地址的
+  
+  map 
+  slice （原则上讲还不是，只是结构体中包含一个指向数组的指针）
   channel
   
-  这三个我们一定要 make 初始化之后使用，否则会 panic
+  这三个我们一定要 make 初始化之后使用，否则会 panic （slice 的 append 倒是不会）
   
   func 
   
@@ -219,15 +352,25 @@
   上面这篇文章写得还是不错的，虽然和 当前题目感觉没有多大关系
   ```
 
+  
+
 * go interface 需要解决的坑
 
   ```
   我们在返回类型的时候，返回 具体的类型，而不是返回interface。 
-  因为返回interface 的话，我们很难判断是否是nil， （因为 interface 的 type 肯定不是nil 了）
   
+  上面写的有问题， error 就是interface。
+  
+  就是别 实现interface 的 struct 是 nil。
+  
+  
+  
+  因为返回interface 的话，我们很难判断是否是nil， （因为 interface 的 type 肯定不是nil 了）
   我们需要把他的值拉出来判断是否是 nil。（通过反射拿出来不太现实）
   ```
+
   
+
 * go interface
 
   ```
@@ -237,7 +380,10 @@
   
   有方法的 iface
   
-  (itab (type + 方法集合的第一个元素地址，便于寻找)  + data (unsafe pointer  ))
+  (itab (inter + _type  + 方法集合的第一个元素地址，便于寻找 (
+  methods := (*[1 << 16]unsafe.Pointer)(unsafe.Pointer(&m.fun[0]))[:ni:ni]
+  所以可以用 fun [1]uintptr 去存储所有方法，其实有一大片连续的地址空间
+  ))  + data (unsafe pointer  ))
   
   ```
 
@@ -361,7 +507,7 @@
   
   1.sync.Mutex
   2.atomic (cas compare and swap)
-  3.channel 去解决 （底层是加锁了, ）
+  3.channel 去解决 （底层是加锁了）
   ```
 
 * go sync.mutex 和 atomic 的底层实现
@@ -402,6 +548,7 @@
 
   ```
   并行是真正意义上的同时执行
+  
   并发 本质上是轮流执行，速度太快，外界看上去是同时执行 (时间片的切换。轮流执行)
   ```
 
@@ -489,18 +636,20 @@
   同第一种方案。
   
   
-  这种正常情况下没有问题， channel 读取不出来数据会被阻塞，但是当channel close 之后，会一直能不间断的读取到数据，需要注意，一定要判断 value, comma := <- chan  ,判断这个数据是否有用
+  这种正常情况下没有问题， channel 读取不出来数据会被阻塞，但是当channel close 之后，会一直能不间断的读取到数据，需要注意，一定要判断 value, comma := <- chan  ,判断这个数据是否是默认值。
   
   ```
-  
+
 * Var 定义的变量 （make , new ,  var , :=  对比）
 
   ```
   都是未初始化的
-  比如 
+  
   chan  slice channel （指针类型）（零值初始化） 都是 nil ，不能用。 必须得 make
   
-  但是对于 struct int，的初始换 （准确说是零值初始化），可用。 感觉类似于 new (var 的对比， 或者自身 的 := 赋值)， 只不过返回了 地址类型。
+  但是对于 struct int，的初始换 （准确说是零值初始化），可用。 
+  
+  感觉类似于 new (var 的对比， 或者自身 的 := 赋值)， 只不过返回了 地址类型。
   
   var :=   ==========> new =  &(var, :=), make  对指向的底层变量初始化。
   
@@ -538,9 +687,9 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 
 这篇文章对值类型和引用类型有很好的解释
 
-值类型： int float， bool， string， 数组， struct
+值类型： int float， bool， string (不可变类型)， 数组， struct
 
-应用类型 ：slice, map, interface （虽然属于，但无法验证）, chan, func
+引用类型 ：slice, map, interface （感觉就是能否用nil 表示）, chan （多个函数内部传递, 虽然是值传递，但架不住引用类型）, func
 
 值类型的特点是：变量直接存储值
 引用类型的特点是：变量存储的是一个地址
@@ -563,7 +712,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   比如函数内的局部变量，返回了该局部变量的地址，变成野指针。
   
-  interface 类型的函数，编译的时候没办法确定具体类型，只有执行的时候才知道
+  interface 类型的函数，编译的时候没办法确定具体类型，只有执行的时候才知道 （鸭子类型，像动态语言）
   
   chan *int, 这种元素没办法确定以后用在哪，会造成变量逃逸
   
@@ -584,7 +733,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   1.return 定义的内容 和  函数内部内容是同一个函数空间 （如果定义了返回参数的名称，则这个变量应用空间是整个函数）。 defer 的参数如果是 外部传入的，变量值维持定义时候的状态，但是他也不会影响外部变量的状态。
   2.return 的赋值先执行，再执行defer ， 再执行 函数结束指令 (return 的执行不是原子性)
-  3. defer语句中的变量，在defer声明时就决定了。（这点一定要注意）
+  3. defer 如果是一个方法，那就是匿名方法，匿名方法的变量如果传递进去，就走传递进去的值。 如果是引用外面的，就走实际执行到那会的值。
   4. fmt.println() 看做一个func 的执行，参数是传进去的
   ```
 
@@ -672,8 +821,11 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   如果继续读数据，得到的是零值(对于int，就是0)， 两个返回值，另一个是 false
   
   
-  channel 被关闭 可以一直读取。 比如利用 for 循环，关闭后，for 读取不会被阻塞
-  channel 没有被关闭，读取会被阻塞
+  channel 被关闭 可以一直读取。 比如利用 for 循环，关闭后，for 读取不会被阻塞。
+  
+  for range 读取不到值，且不会被阻塞。
+  
+  channel 没有被关闭，读取会被阻塞。 for  n 循环 和 for range 都会被阻塞。
   ```
 
 * 对一个关闭的channel 写入呢，返回值是什么类型. 关闭一个已经关闭的channel
@@ -739,9 +891,10 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 
   ```
    无缓冲： 不管是存值还是取值，都需要对应的消耗者或者提供者，否则容易造成dead lock
-   有缓冲： 不会阻塞，因为缓冲大小是1，只有当放第二个值的时候，第一个还没被人拿走，才会阻塞。
+   有缓冲： 不会阻塞，因为有缓冲池，只有当缓冲池满了，还往里面塞，才会发送阻塞。
+           或者空了，读取阻塞
    
-   无缓冲的chan 的发送和接受同步
+   无缓冲的chan 发送和接受同步
   ```
 
 * go 中两个nil 可能不相等吗
@@ -751,17 +904,31 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   interface  == nil，  不止要 value  == nil  还要  type == nil
   
-  但是 struct 这种 == nil， 只需要 value  == nill
+  但是 struct 的地址类型 等一些引用类型，  这种 == nil， 只需要 value  == nill。
+  
+  struct 属于零值可用，不会等于 nil
   
   //
-  type A interface {}
+  type A interface {} // iface
   
-  var z A
-  z = nil
+  var z A  
+  z == nil (true) // _type  没有绑定实际的变量
   
-  var z1 interface{}
+  var z1 interface{} // eface
   
-  z == z1 (false)
+  z == z1 (true)  // runtime 的 efaceeq  和 ifaceeq 做了特殊处理，详见 (_type 为nil ,就返回true)
+  
+  go tool compile -S xx.go 
+  
+  
+  
+  
+  // 上面的举例不正确
+  var a interface{}
+  var c map[int]int
+  a = c
+  
+  fmt.Println(a == nil) (false)
   ```
 
 * go 函数返回局部变量的指针是否安全
@@ -785,15 +952,25 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 * http 包实现原理
 
   ```
-  Golang中http包中处理 HTTP 请求主要跟两个东西相关：ServeMux (路由匹配) 和 Handler （请求处理）。
+  Golang中http包中处理 HTTP 请求主要跟两个东西相关：
+  ServeMux (路由匹配) （平时我们注册路由，绑定具体的方法）和 
+  Handler （请求处理）（方法中写具体的业务逻辑）。
   
-  ServeMux 本质上是一个 HTTP 请求路由器（或者叫多路复用器，Multiplexor）。它把收到的请求与一组预先定义的 URL 路径列表做对比，然后在匹配到路径的时候调用关联的处理器（Handler）。
+  ServeMux 本质上是一个 HTTP 请求路由器，它把收到的请求与一组预先定义的 URL 路径列表做对比，然后在匹配到路径的时候调用关联的处理器（Handler）。
   
   处理器（Handler）负责输出HTTP响应的头和正文。任何满足了http.Handler接口的对象都可作为一个处理器。通俗的说，对象只要有个如下签名的ServeHTTP方法即可：
   
-  ServeHTTP(http.ResponseWriter, *http.Request)
-  ```
+  ServeHTTP(http.ResponseWriter, *http.Request)。
   
+  
+  具体的 http server
+  
+  监听 端口（比如8080） =》 
+       for 循环，通过端口获取链接  =》 
+       协程出去，处理链接上请求，如果是https, 先进行tls 握手🤝。因为现在一般是长链接，所以需要 for 循环处理。通过读取链接上数据，进行路由匹配，找到具体的处理发放。
+  
+  ```
+
   
 
 * golang 平滑重启原理
@@ -801,10 +978,25 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   ```
   https://www.tizi365.com/archives/83.html
   
-  接受linux  usr2 信号
   
-  启动一个新的进程处理。新的进程启动好后，给老进程发送信号，通知老进程结束。老进程不接受流量，只是处理自己的任务，新的进程接受流量， 处理新的任务。
+  // 当前的goroutine等待信号量
+  quit := make(chan os.Signal)
+  // 监控信号：SIGINT, SIGTERM, SIGQUIT
+  signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
   
+  // 这里会阻塞当前goroutine等待信号
+  <-quit
+  
+  // 调用Server.Shutdown graceful结束
+  timeoutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+  defer cancel()
+  
+  if err := server.Shutdown(timeoutCtx); err != nil {
+  	log.Fatal("Server Shutdown:", err)
+  }
+  
+  // http 和 grpc 都封装好了 shutdown 方法
+  // 我的 server 服务也要封装好 shutdown 方法
   ```
 
 * channel 底层数据结构
@@ -831,7 +1023,9 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 * golang 的 context 的 withcancel 用过么，什么场景
 
   ```
-  withcancel ，withtimeout withdeadline 这些都会返回一个新的context 和一个主动触发的cancel ，我们通过 监听 ctx.Done() 这个chan， 在需要的时候，比如超时设置，获取到 chan 中msg， 主动释放资源 （goroutine 不能通过外力去结束，只能在自己的代码中设置对应的条件去结束）
+  withcancel ，
+  withtimeout 
+  withdeadline 这些都会返回一个新的context 和一个主动触发的cancel ，我们通过 监听 ctx.Done() 这个chan， 在需要的时候，比如超时设置，获取到 chan 中msg， 主动释放资源 （goroutine 不能通过外力去结束，只能在自己的代码中设置对应的条件去结束）
   ```
 
 * Goroutine 变量作用域的问题, 在循环中调用goroutinue修改变量，传递的变量会改变吗？如何优化
@@ -849,7 +1043,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   （1）go中加上了默认break，匹配到对应case，在执行完相应代码后就会退出整个
       switch 代码块
   （2）go中用fallthrough关键字继续执行后续分支的代码
-   （3）go 中 switch 可以用于 反射
+   （3）go 中 switch  type 可以用于获取字段类型
   ```
 
 * go 怎么调度 goroutine
@@ -884,7 +1078,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   https://sanyuesha.com/2017/07/26/go-make-and-new/
   
   都是内存分配。
-  1.make 用在 slice， map， channel， 初始化非零值（nil），上面三个元素本身就是地址类型，返回的就是他们本身 ，但会对他们的内部元素进行初始化（上面三个地址类型 零值都是nil）
+  1.make 用在 slice， map， channel， 初始化非零值（nil），返回的就是他们本身 （slice 结构体，平时我们用的时候是指向底层数组第一个元素的指针， map 是 *hmap， channel 是 *hchanel），但会对他们的内部元素进行初始化（上面三个地址类型 零值都是nil）
   （slice 零值的时候不能 [0] 这样赋值， 但是可以append。 map 因为没有append 的操作，所以啥也不能做， 但是 map 和 slice 都是可以 []int{}, map[string]{} 这样直接给值的。）
   2.new 是对应类型零值元素的地址。new([]int) , 通过 reflect 可以看到的是 *[]int 类型
   ```
@@ -999,12 +1193,15 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 
   ```
   线程安全 ： channel， 就是用来协程间同步数据的。
-   
-  string ， 不可修改， 防止 copy on write, 
-   
-  int， float，这里说的并发安全是可以一起操作他，不会panic， 但是值符不符合预期，需要我们代码中去判断， 所以出了 atomic 包 
   
-  线程不安全： map, slice, 这些 在读写并发时候会有问题， struct 对于相同field 并发读写会有问题，不同field 并发读写没问题.
+  线程不安全：
+  string ， 不可修改， 防止 copy on write （上面有个例子，讲的是string 又读又写出现的问题）
+  
+  int， float， 都不行 所以出了 atomic 包， 需要我们去自行处理。
+  
+  map, slice, 这些 在读写并发时候会有问题， 
+  
+  struct 对于相同field 并发读写会有问题，不同field 并发读写没问题.(因为不同的field 存在于不同的内存地址)
   
   map 有个好处是并发会panic.
   
@@ -1019,10 +1216,9 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   CAS （原子性操作）
   
-  
   ```
-
   
+
 
 
 * 开发的流程规范是什么
@@ -1030,8 +1226,8 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   ```
   1.产品提需求
   2.需求移交
-  3.排期
-  4.技术评审
+  3.技术评审
+  4.排期
   5.开发
   ```
 
@@ -1215,7 +1411,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 
   ```
   1.cpu 读取数据不是一个字节一个字节读取的，比如一次性读取4 个字节或者8个字节， 减少类似粘包，分包的那种问题。32位机器和64位机器。这样读取也能保证原子性操作。
-  2.不同数据类型对齐长度不一样，会根据下一个元素的类型和整体（比如struct）进行padding。
+  2.不同数据类型对齐长度不一样，会让之前的字段填充符合自己被读取时候整数倍，（比如struct）进行padding。
   ```
 
   
@@ -1228,8 +1424,19 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   channel 往空里面写 也是报 nil 错误
   
   slice ，append 不出错很神奇。 但直接取值就会报错了。
+  
+  
+  new 用在 slice， map 和 channel 都是返回对应的地址，都没法用了。
+  
+  new(map[int]int) // 无法直接赋值
+  new(chan int) // 无法往里面塞入数据
+  new([]int) // 无法append
+  
+  
+  一般只能用在 struct 上
+  
   ```
-
+  
   
 
 
@@ -1314,6 +1521,26 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   	if err := recover(); err != nil {
   		fmt.Println("recover: ", err)
   	}
+  }
+  
+  func main() {
+   defer T1()
+  
+  }
+  
+  // 主要是defer 函数不能在panic 的函数外面.
+  
+  // 下面这种没办法捕捉到panic
+  func T2() {
+   defer func() {
+  	if err := recover(); err != nil {
+  		fmt.Println("recover: ", err)
+  	}
+   }
+  }
+  
+  func main() {
+    T2()
   }
   ```
 

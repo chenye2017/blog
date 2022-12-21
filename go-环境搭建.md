@@ -69,6 +69,14 @@ replace：用于将一个模块版本替换为另外一个模块版本。这个�
 今天在初始化别人项目的时候发现goland 的 go vgo 已经设置好了，但是还是找不到go module 的位置，仔细一看发现是自定义的package name 找不到。当我们想用go module 的时候，我们一定要 go init 起一个默认的命名空间，然后当我们使用自己定义的包名的时候，都会用到这个这个命名空间做前缀。
 
 
+5.关于mac下开发go 环境安装遇到的几个问题。
+
+* 首先是我们通过命令行修改 Go111module, goproxy, goprivate 这几个环境变量之后，我们还需要在goland 中再配置一次
+
+* 我们通过 export 环境变量这种方式，只能在当前窗口中生效，我们需要 编辑 /etc/profile 文件让环境变量永久生效。mac下因为zsh的问题，我们需要修改 ~/.zshrc , 加上 source /etc/profile
+
+  
+
 
 以上就是总结的 go 环境安装，完结~~
 

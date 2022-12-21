@@ -178,3 +178,41 @@ Value() 读取就是递归的往父级读取。
 
 对于每个k-v 都包装一下，返回valueCtx, 
 
+
+
+
+
+### 易错点
+
+```
+对于异步任务，公司有个组件叫 fanout， 相比较传统的 go func ，他可以限制协程的数量 。
+其实本质上就是一个 errgroup， 利用 errgroup  自身限制协程数量 ，还有阻塞功能，还有平滑关闭的功能 （题外话，还是返回到文章重点 ctx 上吧）
+
+因为是异步任务，所以 context 并不需要 timeout，看下面这个方法
+
+fanout.add(ctx, func(ctx1 context.Context){
+	 // 自己的方法
+	 do(ctx1) // 注意一定要用ctx1
+})
+
+这个add 方法就是对我们传入的 ctx 进行重写，如下：
+Done() {
+ retuen nil
+}
+Err() {
+ retrun nil
+}
+
+使其成为一个没有结束时间的ctxNew,
+
+然后把我们的 ctx 和 func 组成一个结构体，丢入任务channel 中。
+
+另一方面，限制了最大并发数的 works 从任务channel 中取出消息结构体，执行我们的 func()，参数是结构体的另一个 field ctx, 所以我们在 编写我们具体的方法的时候，一定要用参数ctx1, 而不是 add 的ctx 参数，add 的ctx 参数是外面传进来没有经过处理的， 可能有超时时间的， 而消息结构体的 ctx1 是经过重写的ctx ，是没有超时时间的
+```
+
+
+
+
+
+
+
