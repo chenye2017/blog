@@ -10,26 +10,63 @@
   len 实际占用大小， 
   cap 容量。
   
+  slice append， 如果cap 容量满足，就在原先数组len 后面填充，无论是否已经有元素占领。
+  容易在用切片的时候掉进坑里。
   
-  slice 切片， []int{}[0:4], 影响自身， 此时并没有生成新的数组，指针只是移动了位置，之前指向数组第一个元素，现在指向的是切片开始的元素。
+  slice 切片， []int{}[0:4], 影响自身， 此时并没有生成新的数组，指针只是移动了位置，之前指向数组第一个元素，现在指向的是index开始的元素。
+  
+  start:end 这种切片append 很容易出现意想不到的效果，给原始数组造成影响。因为append 填充的元素是针对原始数组的，是否扩容是原始数组的cap 是否满足当前需求, 如果原始数组cap 能容纳，不用扩容，这个append的操作会影响多个切片
   
   
-  2. for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）（黑金宝盒问题类似，闭包中使用的变量是外部改变的变量，而没有用传入的方法，类似defer 执行）
+  2. for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）
+  （黑金宝盒问题类似，闭包中使用的变量是外部改变的变量，而没有用传入的方法，类似defer 执行）
   
   
-  3.interface 比较问题。（和 nil 的比较，两个元素的比较）（不明朗）
+  3.interface 比较问题。
+  interface 和 nil 比较，必须是 data 和 type 都是 nil，才能判定。
   
   
   4. 并发问题 （race）
+  -race 参数
   
   
-  5. go routine panic 没有捕获到 导致web server 受影响问题. 而且还没有答应panic 堆栈位置，利用 address2line, 查询是哪一行代码出了问题
-  
-  
-  6.cannot use names (type []string) as type []interface {} in argument to printAll） 
+  5.cannot use names (type []string) as type []interface {} in argument to printAll） 
   es 的 terms 查询条件。（不明朗）
+  interface 参数可以被 string 等很多类型传入，但是 []interface 不能直接用 []string, 需要主动构造[]interface。 确实时间复杂度是 o(n)， 得一个一个转换
+  https://www.jianshu.com/p/03c81f4e3956
   
-  interface 参数可以被 string 等很多类型传入，但是 []interface 不能直接用 []string, 需要主动构造[]interface
+  ```
+
+
+* 工作中印象比较深刻的事
+
+  ```
+  背景 : go routine panic 没有捕获到 ，导致 pod 重启，  而且还没有打印 panic 堆栈位置，很难排查问题。 (一般容易发生在 job 任务中 ， web server 框架是 gin 会打印出堆栈)
+  解决 :  
+  1.消息走先提交，后执行的模式，有问题消息不会被重试， 不会一直导致服务重启 。 
+  2，利用 address2line, 查询是哪一行代码出了问题。
+  
+  
+  背景： 佩洛西访台， 单redis 流出过大。（100m）
+  排查：
+  1.观察流出陡增，此刻监控上链接数增长，因为是池化，所以client 增长，此时有扩容，判断是机器上的定时任务。
+  2.运维找出大key
+  
+  
+  背景： 压测，mysql 链接数告警。
+  解决：
+  先重启
+  排查：
+  1.机器没有扩容。
+  2.链接数之前也有增长比较快，只是没到阈值，没有告警，一段时间之后回归正常， 怀疑自然释放，查询数据库配置 idle， 2h ，和监控上链接回归整时间一致，确定是业务增长导致连接池链接数增长。
+  
+  
+  背景：error != nil, 但是打印出来的 %+v error 是nil。 还有panic
+  
+  排查：
+  1.error 是interface， 可能 type 不等于 nil, data 等于 nil， 但这%+v 也不应该打印出nil， 本地测试会执行Error() 相关
+  2.发现 errgroup 中并发修改 err， 所以导致了一些列 后面打印 以及 panic 这种异常情况
+  
   ```
 
   
@@ -55,7 +92,9 @@
   map 的遍历没有次数限制
   https://segmentfault.com/a/1190000023477520
   
-  map 是无序的，随机从一个bucket（也就是index），故意的， 开始遍历，不会像 slice 那样有固定的次数
+  map 是无序的，随机从一个bucket（也就是index），故意的， 开始遍历，不会像 slice 那样有固定的次数。
+  
+  不仅仅bucket 任意，而且bucket 下面的key 也是任意
   
   可能读取到，也可能读取不到，随机（如果插入的元素在当前遍历到的元素后面，就能输出）
   
@@ -67,15 +106,18 @@
 
   ```
   同一个协程中可以的。
+  
   不同的协程中会报冲突 （并发不安全，可以用sync map）
   ```
 
   
 
-* map  struct 类型value 修改  （不明朗）
+* map  struct 类型value 修改  （不是很明确，后面还是看看rehash 的源码理解下）
 
   ```
-  不可以， 会rehash， key => value 地址 ，可能会变动
+  不可以， 会rehash， 
+  
+  key => value 地址 ，可能会变动
   
   m1 := make(map[string]S1)
   
@@ -83,14 +125,23 @@
   m1["test1"] = S1{Name: "test1"}
   m1["test1"].Name = "TEST" // php 中经常这么编写
   
+  // go 中这样是不允许的， 我觉得和rehash 有关，go的迁移过程是动态的，
+  //slice之所以可以这样取值感觉是因为slice 的迁移一次性完成
   
+  
+  // 下面这种方法可以解决map 的取地址问题。
   m1 := make(map[string]*S1)
   m1["test"] = &S1{Name: "test"}
   m1["test1"] = &S1{Name: "test1"}
   m1["test1"].Name = "TEST" //
   
-  slice 就可以这样用
   
+  // string 也不能寻址，所以
+  a := "tt"
+  a[0] = "c" // 这样是不能修改的
+  a = "ttt" // a的地址其实是改变的
+  
+  // 常量，零值也不能寻址，意思就是不能修改。
   
   issure: https://github.com/golang/go/issues/3117
   问题原因不明，主要是
@@ -101,13 +152,19 @@
 
   
 
-* map 的比较  （不明朗）
+* map 的比较  
 
   ```
-  map 本身不能比较，deep equal   （不能用 == ）
+  map 本身不能比较，  deep equal   （不能用 == ），感觉平时我们也没有比较map 的需要。
+  
   slice 也不能比较大小 （不能用 ==）
   
-  interface 可以比较大小
+  数组: [3]int{} 和 [4]int{} 都不一样。
+  
+  
+  
+  interface 可以比较大小。这种常用在 error 的比较。
+  
   
   注意这些比较大小的时候，都和元素顺序有关，（slice 有关，map 本身就是无序的，应该没啥关系，interface 这种涉及到 type 元素 和 元素自身的比较大小）
   
@@ -120,8 +177,10 @@
 * go 中关于interface 解释
 
   ```
-  // interface 是引用类型。  
+  // interface 是值类型， 只是两个字段 _type 和 data 都是 unsafe.pointer, 都是引用
+  
   // interface ===> iface (包含方法), eface (不包含方法)
+  
   // 并不是说 iface 或者 eface 是引用类型，而是因为
   iface {
    itab uintptr
@@ -158,8 +217,6 @@
   arr := []int{1,2}
   len := (*int)(unsafe.Pointer)(uintptr((unsafe.Pointer(&arr) + 8))
   
-  
-  // 感觉interface比较大小的时候才能显示自己是引用类型的问题，比如两个 errors.New("11") errors.New("11") 大小不相等
   
   // 这个 error 错误比较很重要，因为类似redis 查询的时候都会用到， redis.ErrNil, 所以比较的时候都是对比 package 里面定义的变量
   
@@ -235,7 +292,7 @@
 
 ​     ![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211003170536.png)
 
-*  上图显示不要把 引用类型和 interface 类型和nil 对比弄混了！！！interface 的对比除了值以外，还要对比type
+*  不要把 interface 和nil 对比弄混了！！！interface 的对比除了值以外，还要对比type
 
 ​     ![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211012182635.png)
 
@@ -250,7 +307,33 @@
   
   ```
 
+
+
+
+* 发现引用类型 ,如果是 nil 也能调用对应 结构的方法，只是不能调用对应结构 中的字段
+
+  ```
+  type Name struct {
+    N1 string
+  }
   
+  func (n  *Name) Get() string{
+     if n == nil {
+      return ""
+     }
+     
+    return n.N1
+  }
+  
+  var t *Name
+  
+  t.Get() 是正常执行的，我们再调用字段的时候，用 t.Get() 可以省去判断 t 是否是nil
+  
+  ```
+
+  
+
+
 
 * channel 的读取
 
@@ -260,6 +343,11 @@
   注意，channel中有元素的时候，不管 channel 是否关闭，都是true， 其实就是标志这个数据是不是init data（这块可以结合源码看一下）
   
   就是这个标志位不会实时根据channel 是否关闭，而是在读完所有数据之后，如果关闭了，channel 不会阻塞，可以返回值，否则是阻塞。
+  
+  
+  // 代码中我们经常要做到通知 关闭的功能
+  // 之前 我们是向一个 作用关闭的channel 中塞入一个信号，当我们从中获取到 信号的时候，代表功能关闭
+  // 其实我们大可不必， 可以直接把这个channel 设置成  <-chan struct{}, 当这个chan 不堵塞的时候，代表这个chan 关闭了
   ```
 
 
@@ -291,7 +379,7 @@
 * map 的遍历过程  (不明朗，看下map 的底层数据结构，看下map 的for range 代码)
 
   ```
-  随机数--》哪个bucket (index) 开始遍历-- 》key(8个) -》overflow -》查询value
+  随机数--》任意bucket (index) 下面 任意 元素 开始遍历-- 》key(8个) -》overflow -》查询value
   ```
 
   
@@ -304,9 +392,11 @@
 
   
 
-* float 类型可以作为map key吗 (不明朗)
+* float 类型可以作为map key吗 
 
   ```
+  go 中float 好像一直有精度问题，所以我们在比较的时候一定要注意
+  
   可以，但是float 存在精度问题
   ```
 
@@ -325,7 +415,7 @@
   ```
   第一想法就是用slice 存储 key.
   
-  但其实还要加一个sort 排序， 让顺序固定住
+  但其实还要加一个sort 排序， 让 key 的顺序固定住
   
   for range  key ===> 从map 中取数
   ```
@@ -337,11 +427,14 @@
   ```
   nil 是值，代表初始值。这个变量如果是 nil 还是能取到地址的
   
-  map 
+  map   （可以直接在函数内部修改，但是感觉这样写容易出bug， 我们的func 作用是修改map， 感觉容易被忽略，感觉不如把值返回出来）
   slice （原则上讲还不是，只是结构体中包含一个指向数组的指针）
-  channel
+  channel  （所以channel 可以在各个func 中传递， 让并发编程更加方便）
   
   这三个我们一定要 make 初始化之后使用，否则会 panic （slice 的 append 倒是不会）
+  
+  
+  
   
   func 
   
@@ -361,12 +454,15 @@
   
   上面写的有问题， error 就是interface。
   
-  就是别 实现interface 的 struct 是 nil。
+  就是想表述的是 某些实现了interface 的字段，即使自身是 nil，转换成 interface 后，和 nil 相比都是不相等的。
   
   
   
   因为返回interface 的话，我们很难判断是否是nil， （因为 interface 的 type 肯定不是nil 了）
   我们需要把他的值拉出来判断是否是 nil。（通过反射拿出来不太现实）
+  
+  b站的 error ，相判断二者是否相等，就得使用自身实现的 cause 方法
+  
   ```
 
   
@@ -560,7 +656,7 @@
   goroutine id ， 黑科技，go 官方不希望给出来。（不希望 goroutine 级别的信息存储，不容易回收。goroutine 数据不能主动回收 和 结束， 是通过 gc 来进行回收）
   ```
 
-* 无意间看到 string 并发的坑 (string 底层也是一个结构体，runtime 级别， len 和 data 不一致)
+* 无意间看到 string 并发的坑 (string 底层也是一个结构体， len 和 data 不一致)
 
   ```
   https://segmentfault.com/a/1190000023283854
@@ -2222,7 +2318,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   2.线程类似于程序中的多个任务，cpu 独立运行和独立调度的最小单位， 内核态线程 （网易云 播放歌曲 和 歌词滚动同时运行）
   3.进程拥有自己的资源空间，一个进程包含多个线程，多个线程共享同一个进程的资源
   4.cpu 上跑的任务是线程
-  5.协程 ，微线程，占用内存小，2kb（go 协程），用户态线程。 
+  5.协程 ，微线程，占用内存小，2kb（go 协程），可以自动扩容， 用户态线程。 线程栈2m
   对于cpu 来说，他是不知道协程的存在的。
   
   为什么协程切换代价比线程切换代价小？
@@ -2352,9 +2448,45 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   ```
   goroutine 没有得到很好的释放
   
-  1.同事封装的超时函数， 通过 select 接受 两个 channel， 当超时后 channel，关闭，没有消费者了，导致channel 堵塞，生产者所在的channel 没法关闭，导致goroutine 不能释放。
+  1.同事封装的超时函
   
-  2.用的 b站封装的 errgroup 函数，有个设置groutine 数量的，使用的是 缓冲channel。 当时没有用他的wait 方法。 导致 没能关闭这个缓冲channel， 又因为他的协程中有个 for range channel 的操作， 导致一直for range 阻塞， groutine 得不到释放。
+  resChannel := make(chan int)
+  go func() {
+  	resChannel <- 1
+  }
+  
+  deadline := time.After(time.Second)
+  
+  select {
+   case : <-resChannel
+  
+   case : <-deadline
+     return responeseDead
+  }
+  
+  
+  通过 select 接受 两个 channel， 当超时后 自动返回超时错误 。
+  
+  可这样一来没有消费者了，导致channel 生产堵塞，所在goroutine 无法释放，导致协程泄露。
+  
+  
+  2.用的 b站封装的 errgroup 函数，有个设置groutine 数量的，GOMAXPROCES。用了这个方法之后，当我们添加 func 的时候，他是塞入 channel 中， 先通过 for 启动固定数量的协程，然后在协程里面通过 for range 去读取对应的方法
+  
+  ctx := context.Background()
+  	res := make(chan func(ctx context.Context) error)
+  	for i:= 0; i<10; i++ {
+  		go func() {
+  			for fun := range res {
+  				_ = fun(ctx)
+  			}
+  		}()
+  	}
+  
+  使用的是 缓冲channel。 
+  
+  当时没有用他的wait 方法。 他的wait 方法会去close 这个 添加方法的chan
+  
+  导致 没能关闭这个缓冲channel 。 又因为他的协程中有个 for range channel 的操作， 导致一直for range 阻塞， groutine 得不到释放。
   
   ```
 
@@ -2363,9 +2495,17 @@ https://blog.csdn.net/love666666shen/article/details/99882528
 * 外部接口请求很慢，怎么排查
 
   ```
-  1.慢sql ，sql 执行是否过多
-  2.连接数是否够用，等待连接池分配连接的时间
-  3.cpu pod负载是否过高
+  通过trace 查看每一部分执行花费的时间。
+  
+  其实还是比较好奇trace 的执行原理。
+  
+  1.慢sql ，sql 执行是否过多。sql 执行一般也会监听 ctx.done
+  
+  2.连接数是否够用，等待连接池分配连接的时间 （之前粉丝勋章 发现在从 redis 或者mysql 中获取数据都要等待好长一段时间）
+  
+  3.缓存获取。 一般也会监听 ctx.done, 缓存获取的是否是个大内容
+  
+  4.cpu pod负载是否过高
   ```
 
 * 分布式事务
