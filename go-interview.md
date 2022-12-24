@@ -7,29 +7,46 @@
   
   slice 三个属性组成，
   数组指针，
-  len 实际占用大小， 
+  len 实际占用大小，
   cap 容量。
   
   
   slice 切片， []int{}[0:4], 影响自身， 此时并没有生成新的数组，指针只是移动了位置，之前指向数组第一个元素，现在指向的是切片开始的元素。
   
   
-  2. for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）（黑金宝盒问题类似，闭包中使用的变量是外部改变的变量，而没有用传入的方法，类似defer 执行）
+  2. for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）（黑金宝盒问题类似，闭包中使用的变量是外部改变的变量，而没有用传入的方法，类似defer func() {} 的执行，
+  
+  之前有个同事 defer log.Print("%+v", res). 本想着打印最后的结果集，结果因为参数开始执行的时候已经确定了。并不会真的在打印出最终的res
   
   
-  3.interface 比较问题。（和 nil 的比较，两个元素的比较）（不明朗）
+  3.interface 比较问题。
+  
+  iface {
+   _itab 类型
+   data 数据指针
+  }
+  
+  eface {
+   type 类型
+   data 数据指针
+  }
+  
+  必须type data 都是nil, 才能代表是 nil。
+  
   
   
   4. 并发问题 （race）
   
   
-  5. go routine panic 没有捕获到 导致web server 受影响问题. 而且还没有答应panic 堆栈位置，利用 address2line, 查询是哪一行代码出了问题
+  5. goroutine panic 没有捕获到 导致web server 受影响问题. 而且还没有 打印panic 堆栈位置，利用 address2line, 查询是哪一行代码出了问题
   
   
   6.cannot use names (type []string) as type []interface {} in argument to printAll） 
   es 的 terms 查询条件。（不明朗）
   
   interface 参数可以被 string 等很多类型传入，但是 []interface 不能直接用 []string, 需要主动构造[]interface
+  
+  // 感觉是因为 []interface 这种是可以装任意类型，像string, int, 但是 []string 只能装一种类型。
   ```
 
   
@@ -55,9 +72,9 @@
   map 的遍历没有次数限制
   https://segmentfault.com/a/1190000023477520
   
-  map 是无序的，随机从一个bucket（也就是index），故意的， 开始遍历，不会像 slice 那样有固定的次数
+  map 是无序的，随机从一个bucket（也就是index）中 随机 key 遍历，故意的， 
   
-  可能读取到，也可能读取不到，随机（如果插入的元素在当前遍历到的元素后面，就能输出）
+  可能读取到，也可能读取不到，（如果插入的元素在当前遍历到的元素后面，就能输出）
   
   ```
 
@@ -68,6 +85,9 @@
   ```
   同一个协程中可以的。
   不同的协程中会报冲突 （并发不安全，可以用sync map）
+  
+  
+  被删除的元素可能先被读取到
   ```
 
   
@@ -96,23 +116,56 @@
   问题原因不明，主要是
   m1[int]int
   m1[int] = 1 这种就可以直接赋值，为啥struct 不可以。
-  目前只知道的是解决办法
+  
+  官方最简单的说法是 m[1] 可能不存在。这时候不知道怎么处理，到底应该是error 么，slice 是直接panic
+  
+  最常见的说法是 map 的value 不可以寻址。
   ```
 
   
 
-* map 的比较  （不明朗）
+* map 的比较  
 
   ```
   map 本身不能比较，deep equal   （不能用 == ）
   slice 也不能比较大小 （不能用 ==）
-  
-  interface 可以比较大小
+  只能用 reflect.DeepEqual, 其实很少见 map 和 slice 需要比较大小的
+  interface 可以比较大小, 常见error 比较大小。
   
   注意这些比较大小的时候，都和元素顺序有关，（slice 有关，map 本身就是无序的，应该没啥关系，interface 这种涉及到 type 元素 和 元素自身的比较大小）
   
-  （struct 如果不包含 map 这些不可以比较的元素，他就是能比较的）
-   
+  
+  https://juejin.cn/post/6881912621616857102 
+  关于是否可以比较
+  
+  struct 可以比较的前提是必须是同一种数据类型，或者是强制转换成统一种类型。 
+  
+  
+  type T2 struct {
+      Name  string
+      Age   int
+      Arr   [2]bool
+      ptr   *int
+      map1  map[string]string
+  }
+  
+  type T3 struct {
+      Name  string
+      Age   int
+      Arr   [2]bool
+      ptr   *int
+      map1  map[string]string
+  }
+  
+  func main() {
+      var ss1 T2
+      var ss2 T3
+      
+      ss3 := T2(ss2)
+      fmt.Println(ss3==ss1)   // 含有不可比较成员变量
+  }
+  
+  go 中强制转换还挺容易
   ```
 
   
@@ -1212,9 +1265,9 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   ```
   GMP （runtime 怎么调度 goroutine 的执行的）
   
-  CSP (并发模型三种)
+  CSP (描述并发系统中交互模式的形式化语言，通过共享内存去通信，而不是通信去共享内存 。go 语言参考了三种， c的语法， csp 的并发 channel 通信， Pascal 的 import package)
   
-  CAS （原子性操作）
+  CAS （原子性操作， compare and swap）
   
   ```
   
@@ -2218,7 +2271,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   ```
   https://zhuanlan.zhihu.com/p/70256971
   
-  1.进程是程序运行的实体，资源分配的最小单位 （qq 和 网易云同时 运行）
+  1.进程是程序运行的实体，资源分配的最小单位 (比如限定某个程序最大多少内存)（qq 和 网易云同时 运行）
   2.线程类似于程序中的多个任务，cpu 独立运行和独立调度的最小单位， 内核态线程 （网易云 播放歌曲 和 歌词滚动同时运行）
   3.进程拥有自己的资源空间，一个进程包含多个线程，多个线程共享同一个进程的资源
   4.cpu 上跑的任务是线程
