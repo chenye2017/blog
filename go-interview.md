@@ -21,8 +21,21 @@
   2. for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）
   （黑金宝盒问题类似，闭包中使用的变量是外部改变的变量，而没有用传入的方法，类似defer 执行）
   
+  之前有个同事 defer log.Print("%+v", res). 本想着打印最后的结果集，结果因为参数开始执行的时候已经确定了。并不会真的在打印出最终的res
+  
   
   3.interface 比较问题。
+  
+  iface {
+   _itab 类型
+   data 数据指针
+  }
+  
+  eface {
+   type 类型
+   data 数据指针
+  }
+  
   interface 和 nil 比较，必须是 data 和 type 都是 nil，才能判定。
   
   
@@ -148,6 +161,11 @@
   m1[int]int
   m1[int] = 1 这种就可以直接赋值，为啥struct 不可以。
   目前只知道的是解决办法
+  
+  
+  官方最简单的说法是 m[1] 可能不存在。这时候不知道怎么处理，到底应该是error 么，slice 是直接panic
+  
+  最常见的说法是 map 的value 不可以寻址。
   ```
 
   
@@ -155,20 +173,45 @@
 * map 的比较  
 
   ```
-  map 本身不能比较，  deep equal   （不能用 == ），感觉平时我们也没有比较map 的需要。
-  
+  map 本身不能比较，deep equal   （不能用 == ）
   slice 也不能比较大小 （不能用 ==）
-  
-  数组: [3]int{} 和 [4]int{} 都不一样。
-  
-  
-  
-  interface 可以比较大小。这种常用在 error 的比较。
-  
+  只能用 reflect.DeepEqual, 其实很少见 map 和 slice 需要比较大小的
+  interface 可以比较大小, 常见error 比较大小。
   
   注意这些比较大小的时候，都和元素顺序有关，（slice 有关，map 本身就是无序的，应该没啥关系，interface 这种涉及到 type 元素 和 元素自身的比较大小）
   
-  （struct 如果不包含 map 这些不可以比较的元素，他就是能比较的）
+  
+  https://juejin.cn/post/6881912621616857102 
+  关于是否可以比较
+  
+  struct 可以比较的前提是必须是同一种数据类型，或者是强制转换成统一种类型。 
+  
+  
+  type T2 struct {
+      Name  string
+      Age   int
+      Arr   [2]bool
+      ptr   *int
+      map1  map[string]string
+  }
+  
+  type T3 struct {
+      Name  string
+      Age   int
+      Arr   [2]bool
+      ptr   *int
+      map1  map[string]string
+  }
+  
+  func main() {
+      var ss1 T2
+      var ss2 T3
+      
+      ss3 := T2(ss2)
+      fmt.Println(ss3==ss1)   // 含有不可比较成员变量
+  }
+  
+  go 中强制转换还挺容易
    
   ```
 
