@@ -1,109 +1,113 @@
-* go 语言遇到的坑
 
-  ```
-  1.slice  相关问题
-  make([]int, 5), len是5， 被0元素填充
-  只想防止扩容， 应该改成 make([]int, 0, 5)
-  
-  slice 三个属性组成，
-  数组指针，
-  len 实际占用大小，
-  cap 容量。
-  
-  slice append， 如果cap 容量满足，就在原先数组len 后面填充，无论是否已经有元素占领。
-  容易在用切片的时候掉进坑里。
-  
-  slice 切片， []int{}[0:4], 影响自身， 此时并没有生成新的数组，指针只是移动了位置，之前指向数组第一个元素，现在指向的是index开始的元素。
-  
-  start:end 这种切片append 很容易出现意想不到的效果，给原始数组造成影响。因为append 填充的元素是针对原始数组的，是否扩容是原始数组的cap 是否满足当前需求, 如果原始数组cap 能容纳，不用扩容，这个append的操作会影响多个切片
-  
-  
-      2. for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）（黑金宝盒问题类似，闭包中使用的变量是外部改变的变量，而没有用传入的方法，类似defer func() {} 的执行，
-  
-    之前有个同事 defer log.Print("%+v", res). 本想着打印最后的结果集，结果因为参数开始执行的时候已经确定了。并不会真的在打印出最终的res
-  
-  
-    3.interface 比较问题。
-  
-    iface {
-     _itab 类型
-     data 数据指针
-    }
-  
-    eface {
-     type 类型
-     data 数据指针
-    }
-  
-    必须type data 都是nil, 才能代表是 nil。
-    
-    
-    
-  
-    
-    
-   3.并发问题 （race）
-  
-  -race 参数
-  
-  
-  
-   4.cannot use names (type []string) as type []interface {} in argument to printAll） 
-    es 的 terms 查询条件。（不明朗）
-    interface 参数可以被 string 等很多类型传入，但是 []interface 不能直接用 []string, 需要主动构造[]interface。 确实时间复杂度是 o(n)， 得一个一个转换
-    https://www.jianshu.com/p/03c81f4e3956
 
+```
+1.slice  相关问题
+make([]int, 5), len是5， 被0元素填充。 ----> [0,0,0,0,0]
+只想防止扩容， 应该改成 make([]int, 0, 5) ---> []. len 0, cap 5
+
+slice 三个属性组成，
+
+数组指针.
+len 实际占用大小，
+cap 容量。
+
+
+
+slice 的底层是数组，数组不能扩容，slice 会扩容，扩容后数组地址会变！！！ notice。
+```
+
+
+
+
+
+```
+
+slice append， 如果cap 容量满足，就在原先数组len 后面填充，无论是否已经有元素占领。
+容易在用切片的时候掉进坑里。(都是因为切片是 浅 copy， 一般 = 都是公用底层相同的数组)
+当前切片的len 会指示当前切片能看到的元素。
+
+slice 切片， []int{}[0:4], 影响自身， 此时并没有生成新的数组，指针只是移动了位置，之前指向数组第一个元素，现在指向的是index开始的元素。修改了 len的值， cap 的值随着 start index 的变化而变化。末尾到原切片末尾
+
+start:end 这种切片append 很容易出现意想不到的效果，给原始数组造成影响。
+因为append 填充的元素是针对原始数组的，是否扩容是原始数组的cap 是否满足当前需求, 如果原始数组cap 能容纳，不用扩容，这个append的操作会影响多个切片。
+append 元素的位置又是当前切片的 len 的下一个位置。（这个地方是个坑点，append 是len 的下个位置，而不一定是元素为0的位置）
+
+所以append的 slice，最好用copy 函数深度copy下。如下：
+
+
+  s123 := []int{5}
+	s123 = append(s123, 7)
+	s123 = append(s123, 9)
+	x := append(s123, 11)
+	y := append(s123, 12)
+	
+	fmt.Println(s123, x, y)
+	
+	// s :[5, 7, 9]. len：3， cap: 4
+	// x ： [5, 7, 9, 12]
+	// y : [5, 7, 9, 12]
+  
+  
+```
+
+ ```
+ 切片的扩容,也是经常问的。
  
-
-* 工作中印象比较深刻的事
-
-  ```
- 背景 : go routine panic 没有捕获到 ，导致 pod 重启，  而且还没有打印 panic 堆栈位置，很难排查问题。 (一般容易发生在 job 任务中 ， web server 框架是 gin 会打印出堆栈)
-  解决 :  
-  1.消息走先提交，后执行的模式，有问题消息不会被重试， 不会一直导致服务重启 。 
-  2，利用 address2line, 查询是哪一行代码出了问题。
-
-
-  背景： 佩洛西访台， 单redis 流出过大。（100m）
-  排查：
-  1.观察流出陡增，此刻监控上链接数增长，因为是池化，所以client 增长，此时有扩容，判断是机器上的定时任务。
-  2.运维找出大key
-
-
-  背景： 压测，mysql 链接数告警。
-  解决：
-  先重启
-  排查：
-  1.机器没有扩容。
-  2.链接数之前也有增长比较快，只是没到阈值，没有告警，一段时间之后回归正常， 怀疑自然释放，查询数据库配置 idle， 2h ，和监控上链接回归整时间一致，确定是业务增长导致连接池链接数增长。
+ 
+ 分版本。
+ 
+ 1.18版本之前：小于等于1024 ，都是double， 之后是0.25倍增长
+ 
+ 1.18之后，包含。 小于256 都是double， 之后是  (n + 256 * 3)/ 4 的增长
+ 
+ 还要进行内存对齐，内存对齐后一般都会多余之前的长度。
+ 
+ 特别要注意如果一次性插入多个元素。
+ 
+ 一次扩容2倍小于要出入的元素，那就以新的大小为准。
+ ```
 
 
-  背景：error != nil, 但是打印出来的 %+v error 是nil。 还有panic
 
-  排查：
-  1.error 是interface， 可能 type 不等于 nil, data 等于 nil， 但这%+v 也不应该打印出nil， 本地测试会执行Error() 相关
-  2.发现 errgroup 中并发修改 err， 所以导致了一些列 后面打印 以及 panic 这种异常情况
+```
+切片作为函数参数。
 
-  ```
-   
+切片底层是 struct， 和 map ，channel 还不太一样，后面2个都是 struct 的地址。
 
-* go  for range slice 循环的时候执行 append, 会死循环么
+所以在go 的值传递中，切片自身len ，cap 不会被修改，但因为包含了指向数组的指针， 所以如果底层数组的中的值被修改，作为函数参数的切片也会被修改。
 
-  ```
-  不会，
+但如果因为扩容，底层数组的地址发生变化，则对底层数组的修改不会反应到函数参数切片上。
+```
+
+
+
+```
+go  for range slice 循环的时候执行 append, 会死循环么
+
+结论：不会
   https://blog.csdn.net/wohu1104/article/details/115496718
-  
+
   这个for range 其实就是 
-  
+
   arrCopy = arr
   for i:=0； i< len(arrCopy); i++ 的封装
   循环的次数在循环开始的时候就确定了
-  
-  
+
+
+  for_temp := range
+  len_temp := len(for_temp)
+  for index_temp = 0; index_temp < len_temp; index_temp++ {
+       value_temp = for_temp[index_temp]
+       index = index_temp
+       value = value_temp
+       original body
+  }
+
+
   func main() {
-      var a = [5]int{1, 2, 3, 4, 5}
+      var a = [5]int{1, 2, 3, 4, 5}  // 这个是数组
       var r [5]int
-  
+
       for i, v := range a {
           if i == 0 {
               a[1] = 12
@@ -113,110 +117,406 @@
       }
       fmt.Println("r = ", r)
       fmt.Println("a = ", a)
+
   }
-  
+
   // 输出。说明真的 a 是copy
   r =  [1 2 3 4 5]
   a =  [1 12 13 4 5]
   
+  
+
   // 一种修改方式 (注意是arr)
   func main() {
       var a = [5]int{1, 2, 3, 4, 5}
       var r [5]int
-  
-      
-      for i, v := range &a {
-          if i == 0 {
-              a[1] = 12
-              a[2] = 13
-          }
-          r[i] = v
+      for i, v := range &a {  // 这个是数组的指针
+      if i == 0 {
+          a[1] = 12
+          a[2] = 13
       }
-      fmt.Println("r = ", r)
-      fmt.Println("a = ", a)
+      r[i] = v
   }
-  // 
-  r =  [1 12 13 4 5]
-  a =  [1 12 13 4 5]
-  
-  
+  fmt.Println("r = ", r)
+  fmt.Println("a = ", a)
+ }
+   
+ // r =  [1 12 13 4 5]
+ // a =  [1 12 13 4 5]
+
+
   // 一种修改方式  (注意是slice)
   func main() {
       var a = []int{1, 2, 3, 4, 5}
       var r [5]int
-  
-      
-      // for range slice 属于浅copy, 注意 for range 里面用的 arr 一定是真实的变量而不是copy的变量
-      for i, v := range a {
-          if i == 0 {
-              a[1] = 12
-              a[2] = 13
-          }
-          r[i] = v
+      // 这个是切片， for range slice 属于浅copy, 注意 for range 里面用的 arr 一定是真实的变量而不是copy的变量
+  for i, v := range a {
+      if i == 0 {
+          a[1] = 12
+          a[2] = 13
       }
-      fmt.Println("r = ", r)
-      fmt.Println("a = ", a)
+      r[i] = v
   }
-  // 
-  r =  [1 12 13 4 5]
-  a =  [1 12 13 4 5]
-  
-  ```
-
-  
-
-* map 遍历的时候append， 可以读取到么
-
-  ```
-  map 的遍历没有次数限制
-  https://segmentfault.com/a/1190000023477520
-  
-   map 是无序的，随机从一个bucket（也就是index），故意的， 开始遍历，不会像 slice 那样有固定的次数。
-  
-  不仅仅bucket 任意，而且bucket 下面的key 也是任意
+  fmt.Println("r = ", r)
+  fmt.Println("a = ", a)
   
   
+  //  r =  [1 12 13 4 5]
+  //  a =  [1 12 13 4 5]
+```
+
+
+
+
+
+
+
+核心函数
+
+![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20230302093813.png)
+
+
+
+![image-20230302093834449](/Users/cy/Library/Application Support/typora-user-images/image-20230302093834449.png)
+
+
+
+```
+ new 和 make 的区别
+
+  https://sanyuesha.com/2017/07/26/go-make-and-new/
   
-   可能读取到，也可能读取不到，（如果插入的元素在当前遍历到的元素后面，就能输出）
-
-
-
-
-*  map 可以边遍历边删除么 
-
-  ```
- 同一个协程中可以的。
-
-  不同的协程中会报冲突 （并发不安全，可以用sync map）
-
-  被删除的元素可能先被读取到
+  都是内存分配。
+  1.make 用在 slice， map， channel， 初始化非零值（nil），返回的就是他们本身 (slice 是本身，map 和 channel 是自身的引用类型)。也只能用在上面三个类型
   
-  ```
+  （
+  slice 结构体， 包含两个属性： 1.len 2.平时我们用的时候是指向底层数组第一个元素的指针，但本质上还是结构体，一旦扩容，指向底层数组指针改变，值就会改变，go 只有值拷贝 
+  map 是 *hmap， 
+  channel 是 *hchanel
+  上面两个都是指针类型，所以当做参数传入函数内部的时候，可以被改变
+  ）
+  （slice 零值的时候不能 [0] 这样赋值， 但是可以append。 
+    map 给 nil map赋值，会导致panic， 空指针
+    channel 给 nil channel 写数据，会阻塞
+  ）
+  
+  2.new 是对应类型零值元素的地址。new([]int) , 通过 reflect 可以看到的是 *[]int 类型。 new 用在上面三个类型也不方便，类似地址的地址。 
+  可被替代，能够通过字面值快速初始化。 &test{}
+```
+
+
+
+
+
+
+
+```
+  2. for  range 执行 goroutine, 变量问题 （这个应该各个语言都有，闭包变量作用域问题）（黑金宝盒问题类似，闭包中使用的变量是外部改变的变量，而没有用传入的方法，类似defer func() {} 的执行，
+
+  之前有个同事 defer log.Print("%+v", res). 本想着打印最后的结果集，结果因为参数开始执行的时候已经确定了。并不会真的在打印出最终的res
+  
+  defer f(). 这个 f 是初始传进去的样子，后期再修改这个 f 并不会改变 defer 的执行
+
+
+  3.interface 比较问题。
+
+  iface {
+   _itab 类型
+   data 数据指针
+  }
+
+  eface {
+   type 类型
+   data 数据指针
+  } (empty的意思)
+
+  必须type data 都是nil, 才能代表是 nil。
+  
+ 
+ 3.并发问题 （race）-race 参数
+
+
+ 4.cannot use names (type []string) as type []interface {} in argument to printAll） 
+  es 的 terms 查询条件。
+  interface 参数可以被 string 等很多类型传入，但是 []interface 不能直接用 []string, 需要主动构造[]interface。 时间复杂度是 o(n)， 得一个一个转换
+  https://www.jianshu.com/p/03c81f4e3956
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```
+map 是什么。
+
+kv 存储结构
+
+一般实现的用hash 表。
+
+hash 冲突用的 拉链法，
+
+最差时间复杂度 o(n)。 平时 o(1)
+
+```
+
+
+
+
+
+```
+map 结构体。 map 底层。
+
+
+// A header for a Go map.
+type hmap struct {
+    // 元素个数，调用 len(map) 时，直接返回此值
+	count     int
+	flags     uint8  // 读写竞态校验
+	// buckets 的对数 log_2
+	B         uint8  // 比如 B = 3, 代表 有 []buckets 有8个元素
+	// overflow 的 bucket 近似数
+	noverflow uint16
+	// 计算 key 的哈希的时候会传入哈希函数
+	hash0     uint32
+    // 指向 buckets 数组，大小为 2^B
+    // 如果元素个数为0，就为 nil
+	buckets    unsafe.Pointer  , hash 表
+	// 等量扩容的时候，buckets 长度和 oldbuckets 相等
+	// 双倍扩容的时候，buckets 长度会是 oldbuckets 的两倍
+	oldbuckets unsafe.Pointer
+	// 指示扩容进度，小于此地址的 buckets 迁移完成, 感觉可以通过top hash 来判断
+	nevacuate  uintptr 
+	extra *mapextra // optional fields, 
+}
+
+
+读取顺序
+1.判断map 是否为空，为空返回默认零值。
+2.计算hash 值。
+3. 后b位 判断落在拿个桶中， 定位具体的 buckt （struct 名称 bmap）
+4. bmap 中如果 old 桶不为空，说明在迁移。如果在迁移，判断当前桶的状态，也就是对比桶tophash 第一个数据的值，是否 小于 min hash值，如果小于说明此 bucket 中的 key 全部被搬迁到了新 bucket。（因为默认赋值的时候 tophash 的值会加上min hash）
+5.得到在新桶还是老桶中那数据。
+6.遍历tophash， 利用hash 高8位，判断是在key 所在 index，通过偏移量得到 value 所在位置
+7.判断value 是否是自己需要的元素，如果是返回，如果不是接着在overflow 中寻找。
+
+
+```
+
+```
+map key 的定位过程。 （不会触发搬迁操作）
+
+1.key 经过hash， 获取后b 位。 判断落在哪个bucket 中。
+
+2.（定位 bucket）获取 map 的 oldbucket 是否为nil， 如果是nil， 说明不在rehash 过程中，接着往下走。 如果 oldbucket 不是 nil， 说明在rehash， 此时需要获取 key 在老 map 中 bucket 所以位置。 判断是否是等量扩容，还是 倍数扩容，确定b 的大小。 找到 key 所在老的 bucket 索引元素， 读取该元素 tophash 的第0个元素，判断该bucket 是否迁移完。如果迁移完了，就回到新的 buckets 中，没有迁移就去老的buckets 中。
+
+3. （在bucket 中定位元素）遍历tophash 数组，判断 key 是否相等，如果相等，拿到index， 通过 offset 偏移 拿到 value 的值。 如果没有相等的，通过 overflow 寻找。
+
+```
+
+
+
+```
+map 的赋值过程 类似上面key 的定位过程。 （会触发搬迁操作）
+
+1.需要检查并发读写。
+
+2.确定bucket 位置，且 该bucket 迁移完成。
+
+3. 修改值正常进行，如果是插入，需要检测是否扩容。
+```
+
+
+
+```
+map 的delete 会触发搬迁操作
+
+其他的类似 赋值，key 的查找
+```
+
+
+
+```
+map 的扩容。
+
+两种场景：
+1.2倍扩容。 负载因子 > 6.5。 （count/ bucket 的数量）
+2.等量扩容。 overflow 过多。（可能之前新增了很多元素，塞满了 bucket中8个空间，但后期删完了）
+
+
+等量扩容简单，元素bucket 索引不变。
+
+增量扩容，需要迁移元素到新的bucket 中（hash 第b位是否是1， 0的话索引不变）。
+
+对于新老bucket ，有 x， y 标志区分。 在tophash 中有体现。
+```
+
+
+
+```
+注意
+
+buckets 中单个元素内，对于 bucket index 一样的元素填充 (8个k-v)
+
+每个元素的地位是一样的，从tophash 第一个开始填充。
+
+所以寻找key 的时候，我们也是遍历 tophash 数组。
+```
+
+
+
+```
+map 带 comma 和 不带 comma 是
+
+两种不同的底层函数实现。汇编实现的， go自身没有重载功能
+
+func mapaccess1(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer
+func mapaccess2(t *maptype, h *hmap, key unsafe.Pointer) (unsafe.Pointer, bool)
+
+
+go 对于不同类型key的访问，底层方法不一样。
+类似 redis 不同数据类型有不同的实现
+```
+
+
+
+![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20230302231142.png)
+
+
+
+```
+map 遍历过程。
+
+先随机任意bucket 的任意cell
+
+再顺序遍历，判断是否有迁移。
+
+如果没有迁移，或者已经迁移到新的bucket ，直接遍历。
+
+如果没有迁移到新的bucket， 只遍历后几位满足条件的元素。对于另一个新的bucket， 等到遍历他的时候再取数据
+```
+
+
+
+![image-20230302232100550](/Users/cy/Library/Application Support/typora-user-images/image-20230302232100550.png)
+
  
 
-* map  struct 类型value 修改  （不是很明确，后面还是看看rehash 的源码理解下）
-
-  ```
-
-   不可以， 会rehash， 
-
-  key => value 地址 ，可能会变动
-
-  m1 := make(map[string]S1)
-
-  m1["test"] = S1{Name: "test"}
-  m1["test1"] = S1{Name: "test1"}
-  m1["test1"].Name = "TEST" // php 中经常这么编写
-
-  // go 中这样是不允许的， 我觉得和rehash 有关，go的迁移过程是动态的，
-  //slice之所以可以这样取值感觉是因为slice每次取值都是针对 初始指针做的偏移计算
 
 
-  // 下面这种方法可以解决map 的取地址问题。
+
+
+```
+map 线程不安全。
+
+if h.flags&hashWriting == 0 {
+		throw("concurrent map writes")
+	}
+	
+throw 这种还没法recover。	
+```
+
+
+
+```
+map 不能取地址。
+
+/main.go:8:14: cannot take the address of m["qcrao"]
+
+func main() {
+	m := make(map[string]int)
+
+	fmt.Println(&m["qcrao"])
+}
+
+
+如果通过其他 hack 的方式，例如 unsafe.Pointer 等获取到了 key 或 value 的地址，也不能长期持有，因为一旦发生扩容，key 和 value 的位置就会改变，之前保存的地址也就失效了。
+
+```
+
+
+
+```
+go map的遍历是无序的
+
+原因 map 会扩容，所以输出元素可能乱序。
+
+为了防止大家误用，因为有时候顺序，扩容后就不顺序
+
+所以go 在每次遍历获取数据的时候都用上随机值。bucket 随机，bucket 下面的cell 随机。
+```
+
+ 
+
+
+
+```
+ map 遍历的时候append， 可以读取到么
+ 
+ map 的遍历没有次数限制。 并没有 copy 一个新的 map。
+https://segmentfault.com/a/1190000023477520
+
+ map 是无序的，随机从一个bucket（也就是index），故意的， 开始遍历，不会像 slice 那样有固定的次数。
+
+不仅仅bucket 任意，而且bucket 下面的key 也是任意
+
+ 可能读取到，也可能读取不到，（如果插入的元素在当前遍历到的元素后面，就能输出）
+
+```
+
+
+
+
+
+```
+ map 可以边遍历边删除么 
+ 
+ 同一个协程中可以的。
+
+不同的协程中会报冲突 （并发不安全，可以用sync map）
+
+被删除的元素可能先被读取到
+
+```
+
+
+
+```
+map  struct 类型value 修改  
+
+
+ 不可以， 会rehash， 
+
+key => value 地址 ，可能会变动
+
+m1 := make(map[string]S1)
+
+m1["test"] = S1{Name: "test"}
+m1["test1"] = S1{Name: "test1"}
+m1["test1"].Name = "TEST" // php 中经常这么编写
+
+// go 中这样是不允许的， 
+//slice之所以可以这样取值感觉是因为slice每次取值都是针对 初始指针做的偏移计算
+
+
+ // 下面这种方法可以解决map 的取地址问题。直接用地址类型
   m1 := make(map[string]*S1)
   m1["test"] = &S1{Name: "test"}
   m1["test1"] = &S1{Name: "test1"}
-  m1["test1"].Name = "TEST" //
+  m1["test1"].Name = "TEST" 
 
 
   // string 也不能寻址，所以
@@ -227,35 +527,88 @@
   // 常量，零值也不能寻址，意思就是不能修改。
 
   issure: https://github.com/golang/go/issues/3117
-  问题原因不明，主要是
-  m1[int]int
-  m1[int] = 1 这种就可以直接赋值，为啥struct 不可以。
-
-
-  官方最简单的说法是 m[1] 可能不存在。这时候不知道怎么处理，到底应该是error 么，slice 是直接panic
-
-  最常见的说法是 map 的value 不可以寻址。
   
+  最常见的说法是 map 的value 不可以寻址。
+
   m1 := map[int]int{1:2}
   fmt.Println(&m1[1]) // 报错，map 的value 不能寻址
 
-  ```
+  T{} 也不能直接寻址, 不能直接修改他的值，但是能读取。
+```
 
  
 
-* map 的比较
+```
+map的比较。
 
-  ```
 
-  map 本身不能比较，deep equal   （不能用 == ）
-  slice 也不能比较大小 （不能用 ==）
+map 本身不能比较， 只能用deep equal   （不能用 == ）
+
+map 只能和 nil 比较是否相等
+
+slice 也不能比较大小， 要用 deep equal （不能用 ==）
+
+只能用 reflect.DeepEqual, 其实很少见 map 和 slice 需要比较大小的。
+
+
+```
+
   
-  只能用 reflect.DeepEqual, 其实很少见 map 和 slice 需要比较大小的。
-  
-  指针类型 *string （ptr） 比较大小。 地址必须得一样。
-  
-  
-  interface 可以比较大小, 常见error 比较大小。
+
+```
+工作中印象比较深的事
+
+背景 : go routine panic 没有捕获到 ，导致 pod 重启，  而且还没有打印 panic 堆栈位置，很难排查问题。 (一般容易发生在 job 任务中 ， web server 框架是 gin 会打印出堆栈)
+解决 :  
+1.消息走先提交，后执行的模式，有问题消息不会被重试， 不会一直导致服务重启 。 
+2，利用 addr2line, 查询是哪一行代码出了问题。
+
+
+ 背景： 佩洛西访台， 单redis 流出过大。（100m）
+  排查：
+  1.观察流出陡增，和链接数增长趋势一致，因为是池化，所以判断 client 增长，此时有扩容，判断是扩容机器上的定时任务。
+  2.运维找出大key
+
+
+  背景： 压测，mysql 链接数告警。
+  解决：
+  先重启
+  排查：
+  1.机器没有扩容。
+  2.链接数之前也有增长比较快，只是没到阈值，没有告警，一段时间之后回归正常， 怀疑自然释放，查询数据库配置 idle， 2h ，和监控上链接数回落整时间一致，确定是业务增长导致连接池链接数增长，之前数据库的active 链接数一直没打满。
+
+
+  背景：error != nil, 但是打印出来的 %+v error 是nil。 还有panic
+
+  排查：
+  1.error 是interface， 可能 type 不等于 nil, data 等于 nil， 但这%+v 也不应该打印出nil， 本地测试会执行Error() 相关
+  2.发现 errgroup 中并发修改 err， 所以导致了一系列奇怪的问题。 err != nil, 但是打印出来的err 是 nil
+
+  3. err 本是 interface， 这个赋值公用同一个地址
+
+  err := errors.New("11")
+	err1 := err
+	
+  addr := (*Iface1)((unsafe.Pointer(&err)))
+	fmt.Println(addr.D)
+
+	addr1 := (*Iface1)((unsafe.Pointer(&err1)))
+	fmt.Println(addr1.D)
+```
+
+
+
+```
+interface 可以比较大小, 倒不是比较大小，是比较是否相等。
+
+常见error 比较大小, 其实是比较是否相等
+
+
+slice， map 和 func 痘印不能比较是否相等，
+
+需要通过 deep equal.
+
+(数组能比较是否相等)
 
   注意这些比较大小的时候，都和元素顺序有关，（slice 有关，map 本身就是无序的，应该没啥关系，interface 这种涉及到 type 元素 和 元素自身的比较大小）
 
@@ -286,107 +639,124 @@
   func main() {
       var ss1 T2
       var ss2 T3
-      
       ss3 := T2(ss2)
-      fmt.Println(ss3==ss1)   // 含有不可比较成员变量
-
+  fmt.Println(ss3==ss1)   // 含有不可比较成员变量， 还有这似乎得在同一个包中
   }
+```
 
-  go 中强制转换还挺容易  
-  ```
-* go 中关于interface 解释
+
+
+
 
   ```
-  // interface 是值类型， 只是两个字段 _type 和 data 都是 unsafe.pointer, 都是引用
-  
-  // interface ===> iface (包含方法), eface (不包含方法)
-  
-  // 并不是说 iface 或者 eface 是引用类型，而是因为
+
+ go 中关于interface 解释   
+ 
+ // interface 是值类型， 只是两个字段 _type 和 data 都是 unsafe.pointer, 都是引用
+ 
+// interface ===> iface (包含方法), eface (不包含方法)
+
+ // 并不是说 iface 或者 eface 是引用类型，而是因为
   iface {
    itab uintptr
    data uintptr
   }
-  
+
   eface {
    _type uintptr
    data uintptr
   }
   
-  包含的第一个属性是 引用类型，类似 slice 。
-  
-  // 本质上和 map -》 hmap 不一样， map 取得是 hmap 的地址类型，上面的验证发放可以通过 unsafe 去验证
-  
-  // 获取 map 的 len
-  hmap 
-  {
-   count int
-  }
-  
-  m := map[int]int{11:10}
-  len := **(**int)(unsafe.Pointer(&m))
-  
-  
-  // 获取 slice 的len
-  slice 
-  {
-   data uintptr
-   len int
-   cap int
-  }
-  
-  arr := []int{1,2}
-  len := (*int)(unsafe.Pointer)(uintptr((unsafe.Pointer(&arr) + 8))
-  
-  
-  // 这个 error 错误比较很重要，因为类似redis 查询的时候都会用到， redis.ErrNil, 所以比较的时候都是对比 package 里面定义的变量
-  
-  
-  https://www.veaxen.com/golang%e6%8e%a5%e5%8f%a3%e5%80%bc%ef%bc%88interface%ef%bc%89%e7%9a%84%e6%af%94%e8%be%83%e6%93%8d%e4%bd%9c%e5%88%86%e6%9e%90.html
-  
-  看了上面的文章，发现要真的是 errors.New("11") == errors.New("11") 如果为true 的话，那就完了。因为error 生成的时候又不会全局检查，万一一样了。
-  
-  没有方法的interface , 包含元素类型 和 元素的实际存储位置，只有二者都相等，我们才能认为2个interface 相等。
-  
-  同理 interface 和 nil 比较大小，也就是只有 type 和 value 都等于 nil 的时候我们才能认为他是 nil
-  
-  
+    
+ // 包含的第一个属性是 引用类型，类似 slice 。
+
+ // 本质上和 map -》 hmap 不一样， map 取得是 hmap 的地址类型，上面的验证可以通过 unsafe 去验证
+ 
+ 
+ 
+ 
+ 
+ interface 和 nil 比较，需要 动态类型和动态值 都是 nil， 才能判断  == nil
+ 
   例子：
-  
+
   func main() {
       var v interface{}
       v = (*int)(nil)
       fmt.Println(v == nil)
   }
-  
+
   // 输出 false， 因为 type 是 *int
-  
-  
+
   func main() {
       var data *byte
       var in interface{}
-  
       fmt.Println(data, data == nil)
       fmt.Println(in, in == nil)
-  
-      in = data
-      fmt.Println(in, in == nil)
-  }
-  
+       in = data
+     fmt.Println(in, in == nil)
+   }
+
   // 输出
   true
   true
   false
   
-  判断interface 是否value 是nil
   
+  
+  
+  
+  
+  
+   https://mp.weixin.qq.com/s/F9II4xc4yimOCSTeKBDWqw
+
+  煎鱼的这篇文章很好的诠释了工作中可能不小心遇到的问题。
+
+  对于结构体指针类型，我们可以直接用nil 比较。
+
+  对于 interface （error） 类型，我们要结合 type 和 value 一起比较
+
+
+  以上interface 的比较，就遇到之前在做 redis ErrNil 错误的对比，注意ErrNil 是我们申明的一个变量，方法里面我们使用这个变量的时候，直接return 这个包级别的变量，不能根据 message 再重新生成，否则不等于 （临时生成的变量地址，还外抛， 野指针）
+  ```
+
+
+
+![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211012182635.png)
+
+ 
+
+```
+  下面本质上还是interface 比较的问题
+  
+  我们在返回类型的时候，如果返回类型是interface 类型，比如 error
+
+ notice:
+  1.我们直接返回nil （不给具体的动态type类型）
+  2.如果我们返回 具体的类型，那不管这个类型表示的意义如何， 他都不等于 nil, 因为interface 的动态类型有了具体的值。
+
+  
+
+
+ 因为返回interface 的话，我们很难判断是否是nil， （因为 interface 的 type 肯定不是nil 了）
+ 我们需要把他的值拉出来判断是否是 nil。可以通过反射。
+
+ b站的 error ，相判断二者是否相等， 先断言成标准error  struct, 再利用该 error 的cause 方法解析。
+ 
+ 
+ 
+ 
+ 判断interface 是否value 是nil
+
   func main() {
       var data *byte
       var in interface{}
-  
-      in = data
-      fmt.Println(IsNil(in))
+       in = data
+  fmt.Println(IsNil(in))
   }
-  
+
+
+   // go的 反射包封装了 isNil 方法。可以了解下 reflect的 key ， value 之间的转换。
   func IsNil(i interface{}) bool {
       vi := reflect.ValueOf(i)
       if vi.Kind() == reflect.Ptr {  // 这块其实有缺陷，除了指针，还有 map slice func 的特殊处理
@@ -394,273 +764,648 @@
       }
       return false
   }
+```
+
+
+
+
+
+
+
+```
+  // unsafe 指针的使用
+  // 获取 map 的 len
+  hmap 
+  {
+   count int
+  }
+
+  m := map[int]int{11:10}
+  len := **(**int)(unsafe.Pointer(&m))
+
+
+  // 获取 slice 的len
+  slice 
+  {
+   data uintptr
+   len int
+   cap int
+  }
+
+  arr := []int{1,2}
+  len := (*int)(unsafe.Pointer)(uintptr(unsafe.Pointer(&arr) + 8)
+```
+
+
+
+```
+ // 这个 error 错误比较很重要，因为类似redis 查询的时候都会用到， redis.ErrNil, 所以比较的时候都是对比 package 里面定义的变量
+  https://www.veaxen.com/golang%e6%8e%a5%e5%8f%a3%e5%80%bc%ef%bc%88interface%ef%bc%89%e7%9a%84%e6%af%94%e8%be%83%e6%93%8d%e4%bd%9c%e5%88%86%e6%9e%90.html
   
-  
-  
-  
-  
-  https://mp.weixin.qq.com/s/F9II4xc4yimOCSTeKBDWqw
-  
-  煎鱼的这篇文章很好的诠释了工作中可能不小心遇到的问题。
-  
-  对于结构体指针类型，我们可以直接用nil 比较。
-  
-  对于 interface （error） 类型，我们要结合 type 和 value 一起比较
-  
-  
-  以上interface 的比较，就遇到之前在做 redis ErrNil 错误的对比，注意ErrNil 是我们申明的一个变量，方法里面我们使用这个变量的时候，直接return 这个包级别的变量，不能根据 message 再重新生成，否则不等于 （临时生成的变量地址，还外抛， 野指针）
-  
+   看了上面的文章，发现要真的是 errors.New("11") == errors.New("11") 如果为true 的话，那就完了。因为error 生成的时候又不会全局检查，万一一样了。
    
+   
+  没有方法的interface , 包含元素类型 和 元素的实际存储位置，只有二者都相等，我们才能认为2个interface 相等。
+
+  同理 interface 和 nil 比较大小，也就是只有 type 和 value 都等于 nil 的时候我们才能认为他是 nil
   
-  go 中interface 容易遇到的问题：
+```
+
+
+
+![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211003170536.png)
+
+ 
+
+
+
+
+
+
+ 
+
+
+
+
+```
+ go 中interface 容易遇到的问题：
   https://sanyuesha.com/2017/07/22/how-to-understand-go-interface/
-  
+
   package main
-  
+
   import "fmt"
-  
+
   type Person struct {
       age int
   }
-  
+
   func (p Person) Elegance() int {
       return p.age
   }
-  
+
   func (p *Person) GetAge() {
       p.age += 1
   }
-  
+
   func main() {
       // p1 是值类型
       p := Person{age: 18}
-  
       // 值类型 调用接收者也是值类型的方法
-      fmt.Println(p.Elegance())
+  fmt.Println(p.Elegance())
   
-      // 值类型 调用接收者是指针类型的方法
-      p.GetAge()
-     
+  // 值类型 调用接收者是指针类型的方法
+ p.GetAge()
+ }
+ 
+  // ----------------------
   
-      // ----------------------
+ // p2 是指针类型
+ p2 := &Person{age: 100}
   
-      // p2 是指针类型
-      p2 := &Person{age: 100}
-  
-      // 指针类型 调用接收者是值类型的方法
-    
-      // 指针类型 调用接收者也是指针类型的方法
-      p2.GetAge()
-      
-  }
-  
+ // 指针类型 调用接收者是值类型的方法
+
+ // 指针类型 调用接收者也是指针类型的方法
+ p2.GetAge()
+ 
+ 
+ 
   // 上面那块代码虽然是能直接执行的  !!!! （因为语法糖， 而不是 生成了对应的发放）
-  //但是如果我们定义了 interface 类型， 我们的 p 变量是没有拥有 *p 的方法的。 虽然  *p 包含了 所有 p 的方法
+
+  // 但是如果我们定义了 interface 类型， 我们的 p 变量是没有拥有 *p 的方法的。 虽然  *p 包含了 所有 p 的方法
+
   // p 能自动生成*p 的方法， 但是 *p 的方法不能自动生成 p。
-  ```
 
-​     ![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211003170536.png)
-
-*  不要把 interface 和nil 对比弄混了！！！interface 的对比除了值以外，还要对比type
-
-​     ![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211012182635.png)
-
-
-
-* map 的两种get
-
-  ```
-  v, ok := m1["name"]
-  // ok 主要告知到底有没有这这个key
-  // v 取不到值就是默认值，和ok 本身并没有太大关系 （断言的时候 ok 可以安全断言，但是map 取值的时候，如果不想知道到底有没有这个key， 这个ok 可以直接忽略）
+  // interface 之所以对应的 struct 不能执行 *struct 方法，有种解释是， interface 转换后的变量不能寻址，所以 struct{} 不能像语法糖那样 直接调用 &struct{} 的方法
   
+ 
+```
+
+   
+
+ 
+
+  ```
+  
+  map 的两种get
+
+v, ok := m1["name"]
+  // ok 主要告知到底有没有这这个key
+  // v 取不到值就是默认值，和ok 本身并没有太大关系. map 取值唯一要考虑的就是 map 自身是 nil 的情况
+  // map 如果是 nil， 其实是可以取值的，但不能给map 赋值，赋值会 panic.
+  // 断言的时候 ok 可以安全断言，防止 panic 。 但是map 取值的时候，如果不想知道到底有没有这个key， 这个ok 可以直接忽略、
+
   ```
 
 
 
+```
+发现引用类型 ,如果是 nil 也能调用对应 结构的方法，只是不能调用对应结构 中的字段
 
-* 发现引用类型 ,如果是 nil 也能调用对应 结构的方法，只是不能调用对应结构 中的字段
-
-  ```
-  type Name struct {
+type Name struct {
     N1 string
   }
-  
+
+// grpc 中经常封装这种方法
   func (n  *Name) Get() string{
      if n == nil {
       return ""
-     }
-     
-    return n.N1
-  }
-  
-  var t *Name
-  
-  t.Get() 是正常执行的，我们再调用字段的时候，用 t.Get() 可以省去判断 t 是否是nil
-  
+    }
+     return n.N1
+
+}
+
+   var t *Name 
+t.Get() 是正常执行的，我们再调用字段的时候，用 t.Get() 可以省去判断 t 是否是nil
+```
+
+
+
+
+
   ```
-
-  
-
-
+   
 
 * channel 的读取
 
-  ```
-  c, bool := <-chan
-  
-  注意，channel中有元素的时候，不管 channel 是否关闭，都是true， 其实就是标志这个数据是不是init data（这块可以结合源码看一下）
-  
-  就是这个标志位不会实时根据channel 是否关闭，而是在读完所有数据之后，如果关闭了，channel 不会阻塞，可以返回值，否则是阻塞。
-  
-  
-  // 代码中我们经常要做到通知 关闭的功能
-  // 之前 我们是向一个 作用关闭的channel 中塞入一个信号，当我们从中获取到 信号的时候，代表功能关闭
-  // 其实我们大可不必， 可以直接把这个channel 设置成  <-chan struct{}, 当这个chan 不堵塞的时候，代表这个chan 关闭了
-  ```
+  	// 两种单方向的 chan
+  	var  c  <- chan int
+  	  
+  	var  c1  chan <- int
+  	
+  	  c, bool := <-chan
+  	
+  	  注意，channel中有元素的时候，不管 channel 是否关闭，都是true， 其实就是标志这个数据是不是init data（这块可以结合源码看一下）
+  	
+  	  就是这个标志位不会实时根据channel 是否关闭，而是在读完所有数据之后，如果关闭了，channel 不会阻塞，可以返回值，否则是阻塞。
+  	
+  	
+  	  // 给 nil chan 发送数据和接受数据，都会永远堵塞
+  	
+  	  
+  	
+  	  // 代码中我们经常要做到通知 关闭的功能
+  	  // 之前 我们是向一个 作用关闭的channel 中塞入一个信号，当我们从中获取到 信号的时候，代表功能关闭
+  	  // 其实我们大可不必， 可以直接把这个channel 设置成  <-chan struct{}, 当这个chan 不堵塞的时候，代表这个chan 关闭了
 
-
+  
 
 * 断言
 
   ```
   t, _ := m1.(int) // 安全断言，通过 comma 判断断言是否正确，如果断言错了， t 是该类型零值
   // 如果不用ok， 断言错了，会panic
+   // 这个断言可以是 具体类型，也可以是 interface
   ```
-
-  
-
 * map 是线程安全的吗
 
   ```
+
   不是，属于临界资源，没有加锁。
   只有一个标志位， 并发读写的时候会panic （throw 错误）。
-  
+
   channel 是线程安全的，他的struct 结构体中包含一个sync.Mutex 锁
-  
+
   slice 也非线程安全
   string 也非线程安全。
   int 这些但凡没有 锁的都是线程不安全，需要用 atomic包。（复习一下 atmoic）
-  ```
 
+  ```
   
 
+* Atmoic
+
+  ```
+
+  atomic 包含的有 int  ,bool , interface
+
+  add  增加
+
+  load 加载 
+
+  store 存储
+
+  compare and swap  参数 addr， old， new  返回是否swap 成功。
+
+  之前看到一篇文章关于 cas 和 sync.Once 的区别。 
+  sync.Once 会阻塞 通过 sync.Mutx, 
+  cas 操作并不会。 
+
+  感觉如果不阻塞 住， 后面代码 的变更如果 依赖 那个只用执行一次的func， 但那个func 又比较耗时，结果会不符合预期。
+
+  ```
 * map 的遍历过程  (不明朗，看下map 的底层数据结构，看下map 的for range 代码)
 
   ```
-  随机数--》任意bucket (index) 下面 任意 元素 开始遍历-- 》key(8个) -》overflow -》查询value
-  ```
 
-  
+   随机数--》任意bucket (index) 下面 任意 元素 开始遍历-- 》key(8个) -》overflow -》查询value
+
+  ```
+ 
 
 * map 中key 无序
 
   ```
-  开始遍历的 bucket 不一定从哪个开始
+
+ 开始遍历的 bucket 不一定从哪个开始
   ```
 
-  
 
 * float 类型可以作为map key吗 
 
   ```
-  go 中float 好像一直有精度问题，所以我们在比较的时候一定要注意
-  
-  可以，但是float 存在精度问题
-  ```
 
-  
+   go 中float 好像一直有精度问题，所以我们在比较的时候一定要注意
 
-* map 的赋值过程是怎么样的 （不明朗）
+  可以，但是float 存在精度问题。
+
+  浮点数比较大小一定要注意。不能用 ==
 
   ```
-  并发检测 --》是否正在扩容（rehash过程中）--》查询key -》是否hash 冲突--》overflow查询--》count（包含 key 的总数）修改--》是否要overflow
+ 
+
+* map 的赋值过程是怎么样的 
+
   ```
 
-  
+  --》并发检测 （flag）
+  --》定位key （hash 后b位，2^b 为桶的个数）所在的bucket，是否正在扩容（ tophash 和 minTophash 比较），如果是必须得先完成迁移， 再进行增删改查
+  --》是否存在，存在即 更新， 不存在查找 tophash 空闲的地方
+  -》 判断插入后是否会扩容，如果扩容需要扩容完再走一边流程。
+  —》 修改 count 值，修改 flag 值
+
+
+
+  ```
+
+
+![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20230109012832.png) 
+
+
 
 * Map 怎么实现顺序读取
 
   ```
-  第一想法就是用slice 存储 key.
-  
-  但其实还要加一个sort 排序， 让 key 的顺序固定住
-  
-  for range  key ===> 从map 中取数
+   把 key 排序，用slice 存储
   ```
 
-  
+
 
 * go 引用类型
 
   ```
-  nil 是值，代表初始值。这个变量如果是 nil 还是能取到地址的
-  
+
+   nil 是值，代表初始值。这个变量如果是 nil 还是能取到地址的
+
   map   （可以直接在函数内部修改，但是感觉这样写容易出bug， 我们的func 作用是修改map， 感觉容易被忽略，感觉不如把值返回出来）
   slice （原则上讲还不是，只是结构体中包含一个指向数组的指针）
   channel  （所以channel 可以在各个func 中传递， 让并发编程更加方便）
+
   
+
   这三个我们一定要 make 初始化之后使用，否则会 panic （slice 的 append 倒是不会）
-  
-  
-  
-  
-  func 
-  
-  interface // 确实是引用类型，但是我们想做到引用传递，必须得是 * 这种类型type
-  
+
+  interface // 自身值类型 struct，只是struct 里面指向了地址类型 data
+
   https://zhuanlan.zhihu.com/p/105554073
-  
+
   上面这篇文章写得还是不错的，虽然和 当前题目感觉没有多大关系
-  ```
-
-  
-
-* go interface 需要解决的坑
 
   ```
-  我们在返回类型的时候，返回 具体的类型，而不是返回interface。 
-  
-  上面写的有问题， error 就是interface。
-  
-  就是想表述的是 某些实现了interface 的字段，即使自身是 nil，转换成 interface 后，和 nil 相比都是不相等的。
-  
-  
-  
-  因为返回interface 的话，我们很难判断是否是nil， （因为 interface 的 type 肯定不是nil 了）
-  我们需要把他的值拉出来判断是否是 nil。（通过反射拿出来不太现实）
-  
-  b站的 error ，相判断二者是否相等，就得使用自身实现的 cause 方法
-  
-  ```
+ 
 
   
 
-* go interface
+*  go interface
 
   ```
+
   没有方法的 eface
-  
   type + data (unsafe pointer)
-  
+
+
+
   有方法的 iface
-  
   (itab (inter + _type  + 方法集合的第一个元素地址，便于寻找 (
   methods := (*[1 << 16]unsafe.Pointer)(unsafe.Pointer(&m.fun[0]))[:ni:ni]
   所以可以用 fun [1]uintptr 去存储所有方法，其实有一大片连续的地址空间
   ))  + data (unsafe pointer  ))
-  
+
   ```
+
+
+* Go 的 sync 包都用过哪些
+
+  ```
+  sync.Mutex
+
+  sync.Map
+
+  sync.WaitGroup
+
+  sync.Once
+
+  sync.Pool
+
+
+  sync.Cond 不好用，随机唤醒协程，容易饥饿，一般通过 channel 去解决特定唤醒的问题。
+  ```
+
+  
+
+
 
 * go 除了 mutex 锁意外还有那些方式安全读写共享变量
 
   ```
   channel (sync.mutex -> atomic)
-  
+
+
   atomic 包 （sync.Mutex 底层调用了atomic）
-  
+
   感觉本质上都是调用atomic 去控制并发
-  ```
+
+
+
+    https://segmentfault.com/a/1190000006823652 
+    （核心就是defer 的传入参数是 定义函数的时候决定，defer 内部的时候参数 是执行决定）
+    
+    https://tiancaiamao.gitbooks.io/go-internals/content/zh/03.4.html (这个有个需要注意的是变量的作用域，最近的作用域 ， 比如 for range 中 给 goroutine 添加参数， v:=v 这样) （很简单的讲解）
+    
+    https://learnku.com/articles/42255。 这篇文章讲解的很全面。
+    
+    defer 的执行要学会转换
+    
+    核心
+    
+    1.return 定义的内容 和  函数内部内容是同一个函数空间 （如果定义了返回参数的名称，则这个变量应用空间是整个函数）。 defer 的参数如果是 外部传入的，变量值维持定义时候的状态，但是他也不会影响外部变量的状态。
+    2.return 的赋值先执行，再执行defer ， 再执行 函数结束指令 (return 的执行不是原子性)
+    3. defer 如果是一个方法，那就是匿名方法，匿名方法的变量如果传递进去，就走传递进去的值。 如果是引用外面的，就走实际执行到那会的值。
+    4. fmt.println() 看做一个func 的执行，参数是传进去的
+    5. 注意一些shadow 问题，函数内部定义的同名变量的修改，是不会映射到函数外部定义的变量
+       
+    example 
+    
+    例1：
+    
+    // 如果defer 函数中的参数是作为参数传进去的， 定义的时候就能确定参数值。defer 直接调用 定义好的参数(比如内部函数)，也是这样的效果
+      
+    i := 1
+    defer fmt.Println("Deferred print:", i)  // 1
+    i++
+    fmt.Println("Normal print:", i)  // 2
+    
+    // println 传入了函数
+    Normal print: 2
+    Deferred print: 1  
+
+
+​    
+    例2：
+    // 如果是defer body 依赖外部的参数，那defer 最后真正执行的时候才能确定参数值。
+    
+    func main() {
+     var whatever [6]struct{}
+     for i := range whatever {
+      defer func() {
+       fmt.Println(i)
+      }()
+     }
+    }
+    
+    输出
+    5
+    5
+    5
+    5
+    5
+    5
+
+
+​    
+    例3：
+    func main() {
+     var whatever [6]struct{}
+     for i := range whatever {
+      defer func(i int) {
+       fmt.Println(i)
+      }(i)
+     }
+    }
+    
+    输出
+    5
+    4
+    3
+    2
+    1
+    0
+
+
+​    
+    例4：
+    func f1() (r int) {
+        r = 1
+        defer func() {
+            r++
+            fmt.Println(r) // 3
+        }()
+        r = 2
+        return
+    }
+    
+    func main() {
+        f1()
+    }
+
+
+​    
+    例5：
+    
+    func f1() (r int) {
+        defer func() {
+            r++  // go 和 php 不一样，这样不能直接使用，和上面返回的r 是同一个变量
+        }()
+        return 0
+    }
+    func main() {
+        fmt.Println(f1()) // 1
+    }
+
+
+​    
+    例6：
+    
+    func f() (r int) {
+         t := 5
+         defer func() {
+           t = t + 5 
+         }()
+         return t
+    }
+    
+    输出：
+    5
+
+
+​    
+​    
+    例7：
+    func f() (r int) {
+        defer func(r int) {
+              r = r + 5  // 局部变量
+        }(r)
+        return 1
+    }  // 1
+
+
+​    
+    例8：
+    
+    type Person struct {
+        age int
+    }
+    
+    func main() {
+        person := &Person{28}
+    
+        // 1. 
+        defer fmt.Println(person.age) // 28
+    
+        // 2.
+        defer func(p *Person) {
+            fmt.Println(p.age)  // 引用传递，执行的时候，值被改变。 29
+        }(person)  
+    
+        // 3.
+        defer func() {
+            fmt.Println(person.age)  // 29
+        }()
+    
+        person.age = 29
+    }
+
+
+​    
+    例9：
+    
+    type Person struct {
+        age int
+    }
+    
+    func main() {
+        person := &Person{28}
+    
+        // 1.
+        defer fmt.Println(person.age) //28, 这个地方感觉是 age 这个变量被传进去了
+    
+        // 2.
+        defer func(p *Person) {
+            fmt.Println(p.age) // 28, 这个地方28很重要，因为 person 的地址被改变了，之前 p 引用类型传进去的地址值还是 28
+        }(person)
+    
+        // 3.
+        defer func() {
+            fmt.Println(person.age) // 29
+        }()
+    
+        person = &Person{29}
+    }
+    
+    
+
+​    
+
+```
+例10：
+
+很难的一道题
+func f1(n int) (r int) {
+	defer func() {
+		r += n  // 4 + 3 = 7
+	}()
+
+	var f func()
+
+	defer f()
+	f = func() {
+		r += 2 // 压根没有执行， 感觉也是因为 f 是被换地址了
+		fmt.Println(r, "-==")
+	}
+	
+		return n + 1  // r = 3 + 1 = 4
+}
+
+func main() {
+	fmt.Println(f1(3))
+}
+
+// 感觉地址一般不会变，除非重新赋值了。
+```
+
+
+
+
+
+```
+例11 ：
+   // defer函数参数中是func 的时候，会先执行这个参数 func
+   func test3() int {
+  	i := 1
+  	defer func(b int) {
+  		fmt.Println(b)
+  	}(func() int {
+  		return i
+  	}())
+  	i = 4
+    return i
+   }
+   
+ // 输出 1   
+```
+
+ 
+
+```
+defer 配合 recover 恢复 panic
+
+有的paninc 不能恢复，比如 throw 的那种，目前了解到的情况只有, map 的并发读写。
+
+
+recover 只能在 defer 定义的函数中才能生效
+
+defer func() {
+   recover()
+}
+
+
+
+recover 生效的要求比较严格
+
+1.defer recover() // 不能生效
+
+2.defer 嵌套不能生效。
+
+3.recover 只能捕获最近的一个panic， panic 会被覆盖。
+
+```
+
+
+
+```
+1. invalid memory address or nil pointer dereference
+
+所以 grpc 框架中对于字段的获取，都会 先判断 地址类型struct 是否nil， nil 直接返回默认零值。 否则返回属性
+
+
+2. map 就算是 nil 读取不会出现上面情况， 但是赋值会，所以为了减少心智负担，还是提前给初始化吧。
+
+```
+
+
+
+
+
+
 
 * go 小对象 大对象， 为什么小对象多了会造成gc 压力
 
@@ -674,30 +1419,30 @@
   大对象  大于 32kb (mheap 分配，span 0 上，大小不固定)
   
   （大小对象纯属根据size 大小来区分）
-  
-  
+
+
   通常小对象过多会导致GC三色法消耗过多的 cpu。优化思路是，减少对象分配.
-  
+
   优化
   1.利用 sync.pool , 这里面都是无状态的变量 ，不能用于 conn 这种连接信息，而且个数不确定，不适用 连接池固定最小数量，空闲数量 idle
-  
+
   2.利用 数组生成一匹空对象，从中取值，
-  
+
   for _, v := range []int{1,2,3} {
      tmp := People{Name: v}
   }
-  
+
   优化后 // 连续空间的读取，比无序的效率更高
-  
+
   objectArr := make([]People, 3)
-  
+
   for k, v := range []int{1,2,3} {
      tmp :=  objectArr[k]
      tmp.Name = v
   }
-  
+
   // 变种,哪个效率高 （第一个，连续的地址空间）
-  
+
   for i:=0; i< 10;i++ {
     for j:=0; j < 10; j++ {
         tmp := arr[i][j]
@@ -708,38 +1453,724 @@
         tmp := arr[j][i]
     }
   }
-  
+
   ```
 
 * go 内存管理
 
   ````
   https://zhuanlan.zhihu.com/p/266496735
-  
+
   对象切割，多级缓存，位图管理。
-  
+
   mcache， 依附于 p， 没有并发，所以不用加锁。
-  
+
   mcache (各种级别的 span, 不同级别的span 上基本单元大小不一样。span 上的内存分配大小是按照page 分的。 span 有两种类型，一种地址类型，一种值的类型，主要是为了方便gc)
-  
+
   mcentral (被mcache 共享，所以需要加锁，每个mcentral 管理一个有空闲对象的 span, 一个没有空闲对象的span。寻找 分配空间会对上面两个链都进行遍历，因为可能有的空间被gc 了还没有直接放回到空闲对象的span上)
-  
+
   mheap （管理mcentral, 管理大对象的分配，通过位图标记知道哪些span 被使用，哪些没有被使用）
-  
+
   mheap 基数树的形式管理span， 如果没有合适的span ，向内存中申请页大小。
-  
+
   span 上分配内存
-  
+
   span 有很多种级别，67 个 。 0级别（不在 67个之内） 大小不固定。 剩下级别的span 大小逐渐递增，（个数不固定，导致span 大小不一定）。对齐内存到指定大小的span 上。
-  
+
   proccer 进行内存分配的时候，先找缓存 mcache 中 （包含了所有的 mspan），找不到大小空间合适的 mcentrl  中查找 （被共享要加锁，后面更高的肯定要加锁），再找不到 mheap  位图 中查找， mheap 二叉搜索树中查找 ，再左后是虚拟内存 （假装连续空间）分配。
-  
-  内存逃逸从栈上逃逸到堆上 
-  1.地址类型的返回，
-  2.或者大的数据类型
-  3.interface类型
-  
+
+
+
+```
+go什么时候 内存逃逸从栈上逃逸到堆上 
+  1.地址类型的返回，（野指针, 闭包函数， map的返回）
+  2.大的内存占用 （slice len很大，大于栈的内存空间）
+  3.interface类型 （fmt， 编译期间不知道具体的数据类型）
+
   gc 回收的是堆上的对象。
+```
+
+
+
+
+
+ 
+
+
+
+
+
+```
+
+GMP 数量的限制
+G 每个对应内幕才能 2 ~ 4k， 比如 100 0000 ，需要内存 4000 000k = 4G
+
+M 工作线程， M 的默认数量限制是 10000，如果超出则会报错
+
+P process， 可以设置，一般和核数大小一致
+
+```
+
+```
+其实goroutine id是存在的
+
+只是大家不建议使用
+```
+
+```
+GMP 模型，为什要有p
+
+1.之前没有p 的时候，都是全局队列上取 goroutine， 锁竞争激烈
+
+2.如果把 g直接挂在m 上，因为m 会阻塞，这时候我们不希望 g 的处理会被阻塞，所以需要把老的 g队列转移到新的 m的g队列上，麻烦
+
+3.g 队列的数量不会随着 m的增加而增加。
+```
+
+
+
+```
+结构体是否能比较？
+
+其实工作中真的没有碰到过结构体的比较。
+
+倒是遇到 interface 和 nil 的比较。
+
+结构体是能比较的，如果所有字段都能比较。
+
+1.map slice func 不能比较，只能深度比较。
+
+2.指针能比较，如果相等要指向同一个地址。
+
+```
+
+
+
+```
+go time after 协程泄露
+
+res := make(chan int, 1)
+res <- 10
+select {
+ case time.After(3 * time.Second):
+    // timer 不能及时被回收
+ case <-res:
+    fmt.Println("--test--")
+}
+```
+
+
+
+```
+for range 遍历数组的时候，产生的是同一个临时变量， 
+
+for _, v := range arr {
+ 
+}
+
+v 对应的是同一个变量的地址。
+
+所以
+
+var all []*Item
+for _, item := range items {
+ all = append(all, &item)
+}
+此时 输出的all 中所有变量对应 item 数组中最后一个元素
+
+
+
+改造方案：
+
+var all []*Item
+for _, item := range items {
+ item := item
+ all = append(all, &item)
+}
+
+
+又或者
+var prints []func()
+for _, v := range []int{1, 2, 3} {
+ prints = append(prints, func() { fmt.Println(v) })
+}
+for _, print := range prints {
+ print()
+}
+
+改造方案：
+
+for _, v := range []int{1, 2, 3} {
+  v := v
+  prints = append(prints, func() { fmt.Println(v) })
+ }
+
+```
+
+
+
+```
+var nums1 []interface{}
+ nums2 := []int{1, 3, 4}
+ num3 := append(nums1, nums2)
+ fmt.Println(num3)
+ 
+ 
+ 输出：
+ 1
+ 
+ 这题我感觉并不是很难，主要是 append 最后的元素并没有拆解。
+ 
+ 
+```
+
+
+
+```
+go 是值传递
+
+但值传递的话，如果参数是引用类型，还是会修改原先的值的。
+
+map slice channel 
+
+slice 底层包含一个指向数组的指针
+
+map channel 也包含了指向数组的指针
+
+区别是 slice 自身是个结构体，如果存在扩容情况， 指向底层数组的指针被改变，因为不是引用类型，所以字段值被修改后，无法体现在传入变量上。
+
+map 和 channel 因为底层就是值类型，所以不存在上述情况， 不用担心扩容的情况。
+
+
+
+
+还有个要注意的点是打印变量
+
+func (p *pp) fmtPointer(value reflect.Value, verb rune) {
+ var u uintptr
+ switch value.Kind() {
+ case reflect.Chan, reflect.Func, reflect.Map, reflect.Ptr, reflect.Slice, reflect.UnsafePointer:
+  u = value.Pointer()
+ default:
+  p.badVerb(verb)
+  return
+ }
+ 
+ 对 channel ，map， slice 做了特殊处理。
+ 
+ 打印的是底层数据的地址
+```
+
+
+
+```
+面向对象
+
+
+1.封装。 （go 首字母大写，公共。首字母小写，私有）
+2.继承。 （字段嵌套）
+3.多态。 （接口类型）
+
+```
+
+
+
+```
+值传递 和 引用传递 的区别
+
+这种题目感觉对于写了这几年的我来说，感觉不应该记录了，hhh， 但怕蒙了。
+
+
+我们平时工作中对于结构体类型，大部分传的引用，主要担心互相copy ，消耗内存大。 int 这种类型一般传递的还是值，然后通过返回值来修改。
+```
+
+
+
+```
+进程，线程 和 协程的区别
+
+  https://zhuanlan.zhihu.com/p/70256971
+  
+  1.进程是程序运行的实体，资源分配的最小单位 (比如限定某个程序最大多少内存)（qq 和 网易云同时 运行）
+  进程拥有自己的资源空间，一个进程包含多个线程，多个线程共享同一个进程的资源
+  
+  2.线程类似于程序中的多个任务，cpu 独立运行和独立调度的最小单位， 内核态 （网易云 播放歌曲 和 歌词滚动同时运行）
+  cpu 上跑的任务是线程
+  
+  3.协程 ,用户态线程，占用内存小，kb，可以自动扩容，  线程栈 几mb, 线程是cpu 调度， goroutine 是 go runtime 进行调度
+  对于cpu 来说，他是不知道协程的存在的。
+  
+  4.协程进行切换代价比线程小。
+  
+  为什么协程切换代价比线程切换代价小？
+  1.协程间任务的切换发生在用户态，程序控制，资源消耗小。线程的切换发生在内核态，所以需要用户态到内核态的切换， 再内核态到用户态切换。
+  2、而且对于多核情况下，如果协程的切换都发生在一个cpu 上执行，线程的切换在多个cpu上执行， 消耗大。（协程间不需要加锁，因为本质上协程是在一个线程中切换的）https://www.v2ex.com/t/387596​， 协程不用加锁的解释，少场景 （这是以前刚写go 的时候内心os, 协程不用加锁， 但不代表他执行的 内容不用加锁）
+  3.协程的切换只需要把 cpu 的寄存器上内容切换到上次执行的地方，线程包含的资源更多，比如协程切换不用管线程共享的栈内存，但线程间切换就得管。
+```
+
+
+
+```
+GMP 模型下为什么要有p
+
+1.没有p的时候，全局唯一一个队列，锁竞争严重，goroutine 窃取也尽可能减少了 m空转，减少了 cpu 的无效消耗。
+
+2.为什么不挂在m 上，而是直接抽象一个新的组件p。 因为m 可能阻塞，阻塞后并不会销毁，而是用新的 m替代，如果每次产生新的m 就多一条 goroutine 队列，显然不合理，队列的管理也更加复杂。
+```
+
+
+
+```
+结构体是否能够比较
+
+能比较，只要所有字段都能比较。
+
+func main() {
+    v1 := Value{Name: "煎鱼", Gender: "男"}
+    v2 := Value{Name: "煎鱼", Gender: "男"}
+    if v1 == v2 {
+        fmt.Println("脑子进煎鱼了")
+        return
+    }
+
+    fmt.Println("脑子没进煎鱼")
+}
+
+相等。
+
+
+
+
+type Value struct {
+    Name   string
+    Gender *string
+}
+
+func main() {
+    v1 := Value{Name: "煎鱼", Gender: new(string)}
+    v2 := Value{Name: "煎鱼", Gender: new(string)}
+    if v1 == v2 {
+        fmt.Println("脑子进煎鱼了")
+        return
+    }
+
+    fmt.Println("脑子没进煎鱼")
+}
+
+不相等，gender 指向的变量不一致。
+
+
+
+
+
+
+type Value struct {
+    Name   string
+    GoodAt []string
+}
+
+func main() {
+    v1 := Value{Name: "煎鱼", GoodAt: []string{"炸", "煎", "蒸"}}
+    v2 := Value{Name: "煎鱼", GoodAt: []string{"炸", "煎", "蒸"}}
+    if v1 == v2 {
+        fmt.Println("脑子进煎鱼了")
+        return
+    }
+
+    fmt.Println("脑子没进煎鱼")
+}
+
+slice， map， function  不能比较。
+
+
+
+
+
+
+type Value1 struct {
+    Name string
+}
+
+type Value2 struct {
+    Name string
+}
+
+func main() {
+    v1 := Value1{Name: "煎鱼"}
+    v2 := Value2{Name: "煎鱼"}
+    if v1 == v2 {
+        fmt.Println("脑子进煎鱼了")
+        return
+    }
+
+    fmt.Println("脑子没进煎鱼")
+}
+
+不同类型的不能比较。
+```
+
+
+
+```
+单核cpu， 开两个goroutine， 其中一个死循环会怎么样 
+
+1.14版本以下会hang住
+
+包含以及之后的版本会正常，出现了基于信号的抢占式调度。
+
+
+runtime.sysmon 做的检测的事
+1. sysmon线程是无限循环执行。
+2. sysmon线程在每个循环中，会进行netpool（获取fd事件）、retake（抢占）、force gc（按时间强制执行gc），scavenge heap（释放自由列表中多余的项减少内存占用）等处理。
+3. sysmon线程一开始每次循环后，休眠 20us，50次之后（即1ms后）每次休眠时间倍增，最终每一轮都会休眠 10ms。
+
+sysmon 发信号给 m， m收到信号好休眠正在阻塞的goroutine， 调用绑定的信号方法，并进行重新调度。
+```
+
+
+
+```
+进程，线程都有id， 为什么goroutine 没有 id
+
+是有goroutine id 的，但是不建议使用。
+```
+
+
+
+```
+Goroutine 数量控制在多少合适，会影响 GC 和调度
+
+gmp 
+
+p  processor 可以设置，一般和系统核数一样。 gomaxprocs 
+
+m machine, 默认设置 10000， 超过会报错。 GO: runtime: program exceeds 10000-thread limit
+
+g  初始 2k ~ 4k 大小， 所以手内存大小限制。
+
+
+go working steal 先从 global 队列取，再从其他 本地队列取。
+
+```
+
+
+
+
+
+```
+slice 和 map 是否 线性安全
+
+slice 不。 len， cap ，data组成，没有锁。
+
+容易造成 索引覆盖。
+
+
+map 更不能，会throw error 
+
+用sync.map 替代。
+
+
+```
+
+
+
+```
+ sync.map 底层结构 ？
+```
+
+
+
+```
+map 的并发 是否能被recover ？
+
+不能，直接throw 出来的。
+
+map 的nil， 是否能recover ？
+
+能，panic 的信息。
+```
+
+
+
+
+
+
+
+
+
+
+
+```
+米哈游面试题 （https://learnku.com/go/t/60933）
+
+...
+m := make(map[int]int, 10)
+for i := 1; i<= 10; i++ {
+    m[i] = i
+}
+
+for k, v := range(m) {
+    go func() {
+        fmt.Println("k ->", k, "v ->", v)
+    }()
+}
+...
+
+核心问题就是 k v 引用了外部变量，需要用  k := k, v := v 替换。
+
+
+内存泄露， 什么情况下回内存泄露 ？
+
+很出名的一个例子，time.After 时间间隔比较久。
+
+之前同事写了一个例子 
+
+
+tim := time.NewTimer(3 * time.Second)
+res := make(chan interface{})
+select {
+case <-time: 
+    do()
+case tmp := <-res:
+    do()
+}
+结果没了 case2， res 一直阻塞状态， go 协程没办法塞入数据，导致go 协程一直存在，内存泄露。
+
+自己也写过一个例子
+
+goArr := make(chan struct{}, 5)
+
+for _, v := range funcArr {
+   goArr <- v
+}
+
+for _, v := range goArr {
+   go func() {
+      v()
+   }
+}
+
+没有close goArr, 导致 goArr 所以协程一直没有释放。
+
+
+
+channel 的底层实现原理
+
+1.环形数组。
+2.goroutine 组成的双向链表。
+3. sync.Mutex  保证线性安全。
+
+
+make 和 new 的区别。
+make 主要用在 channel， slice， map ，数据类型初始化。 new 主要是用在结构体初始化，返回地址。
+
+
+channel 关闭了接着 send 数据会发生什么，关闭一个已经关闭的 channel 会发生什么。
+send close 会panic 。（想象一下，send 并没有返回值，不能出现别的情况）
+close close 的 也会panic。 （没有返回值）
+获取 close 的channel， 先把数据读取完，再获取到默认零值，通过 comma 去判断。
+
+send 或者 获取 没有初始化的 channel， 会阻塞。
+
+
+map 是线程安全的吗，map 的扩容规则。
+map 非线性安全，每次读取写入都通过flag 去判断。
+map 是渐近性hash， 如果在扩容，会只写到新的 hash 表中。如果是读取，会根据迁移进度判断是在老的hash 表中还是新的，去对应的hash 表中读取，同时迁移未完成的数据。
+
+
+数组和切片的区别。
+切片的底层有个field 是指向数组的指针。
+切片可以扩容，大小不一定。
+切片不能比较大小， 数组可以。
+
+GC
+
+
+GMP 模型。
+
+g goroutine， 数量受内存限制。
+p process 和核数保持一致
+m 工作线程，默认 10000， 超过报错，可以修改。
+
+g 在队列中，通过p 和 m 进行绑定。 如果本地队列为空，会先到global 队列中拿数据，再没有会窃取其他的本地队列。
+如果遇到系统调用，例如网络请求， g会和 m 一起脱离 p， 等到完成， g 回到可调用队列中，m 也回到自己的队列中。
+
+
+
+进程、线程、协程。
+
+进程，资源分配的最小单位。
+线程， cpu 执行的最小单位。内存占用大。 内核态。
+协程，用户态线程。内存占用小
+
+
+
+微服务相关，包括微服务的注册与发现，微服务的监控，微服务的限流相关等等，还有微服务怎么守护进程，我回答的是 supervisor，也不知道对不对。
+具体业务的实现，兑换码的实现，如何批量生成几十万或者上百万的兑换码，（这个我回答的是用雪花算法实现），高并发下，一个兑换码如何保证只能被一个人兑换一次，以及一个兑换码如何可以被多个人兑换的实现。（这道题前前后后回答了有半个小时吧，因为之前做过相关的业务，所以心里有点底）
+三个算法问题。
+写一个方法，解决：输入 4 个数字，通过加减乘除，输出一个期望值。
+广度优先算法：怎么输出各层的值。
+台阶问题，假如对于上台阶，可以一次上一阶，也可以一次上两阶，写一个方法，实现输入台阶数，输出可以有多少种上法。
+
+
+Goroutine 阻塞的话，是不是对应的M也会阻塞?
+
+
+如何并发100个任务，但是同一时间最多运行的10个任务（waitgroup + channel）
+errgroup ，设置最大协程数，for range  通过channel 拿任务。
+
+```
+
+
+
+```
+米哈游面试二
+
+go 里面使用map 应该注意的问题 和 数据结构。
+
+1. map 不能并发读写。
+2. map 不能比较大小。
+3. map 的value 不能直接寻址。
+4. map 使用前需要先初始化，否则可能给一个nil map赋值报错。(读取是没关系的)
+5. map 的缩容其实有点问题， 如果是value 是指针类型还好。
+
+数据结构
+{
+count 字段
+hash 算法
+[]bmap
+}
+
+bmap 对应一个 
+
+hash 索引
+key 数组
+value 数组，通过偏移量读取数据
+overflow  hash冲突的时候溢出
+
+
+
+
+Map 扩容是怎么做的？
+扩容成之前2倍大小，渐进式hash， 有字段代表是否在rehash 中，如果在rehash 中插入操作只往新的 hash表中插入，读取的时候会先判断数据在新的还是老的hash 表中，读取对应hash 值， 也会迁移对应数据。
+
+
+Map 的 panic 能被 recover 掉吗？了解 panic 和 recover 的机制吗？
+map 的panic 有的能被，比如给nil map 赋值。 有的不能，比如并发读写， throw.
+panic机制 ？ 只能捕获当前协程的panic， recover 只能在func 中执行，靠栈存储，先进后执行， 可以参考小米的那篇文章原理。
+
+
+Map 怎么知道自己处于竞争状态？是 Go 编码实现的还是底层硬件实现的？
+flag 变量，go 编码实现。
+
+
+CAS 具体是怎么实现的呢？
+
+
+
+并发使用 Map 除了加锁还有什么其他方案吗？
+sync.map.
+
+
+有对比过 sync.Map 和加锁的区别吗？
+sync.map 更适用于读场景。
+
+
+
+sync.Mutex 的数据结构可以说一下吗？
+
+
+Context 平时什么场景使用到？
+基本上每个函数都用到。比如 http接口中，例如 gin ，把 req 封装在了 context 中，还有 context 中通过中间件注册了用户uid 这些，从里面拿。
+
+
+context.WithTimeout 使用现象和实现？
+如果想缩短超时时间。比如总的服务超时250ms， 依赖的其中某个服务只能给50ms。
+里面会判断传入的超时是否超过当前已存在的超时，如果是延长，直接不处理返回。
+
+实现：应该是一个定时器，到点cancel 。
+
+
+context.WithTimeout 还有 cancel 返回值，如果不去调用是否有问题？
+不会有问题，如果想提前cancel，可以调用，如果不调用，到点了函数内部会自己调用。
+
+
+Redis 哪些场景在使用？
+1.k-v 类型配置
+2.zset 排行榜，延迟队列
+3.set 去重，最近购买记录
+4.hash。用户和主播对应关系。
+
+
+说一下分布式锁的实现？
+1.set ex 过期时间
+2.set nx 不存在才设置。
+3.go func 定期续约。
+4.lua compare and delete 删除数据，防止删错了
+
+
+基于 Redis 的分布式锁会有什么问题？
+我们后端用的redis cluster。主从节点切换 会存在数据丢失问题。redlock 会出现时钟偏移可以重复加锁问题。
+
+Redis 分布式锁超时可以超时时间设长一点可以吗？不可以的话需要怎么解决？
+可以，也可以启动一个类似看门狗 watch dog 的协程，定时续约，到点了 close time ticker 和  删除锁。
+
+
+日常什么项目会用到缓存，用 Redis 做缓存有遇到什么问题吗？
+排行榜。之前某个主播下守护者存成一个string， 用pb序列化，每次前端读取部分数据，服务端都要拉全量数据。qps 高，带宽飙高，超100m/s.
+大key， bitmap 序列化成二进制存储到redis， 0.6m， 每台机器每秒拉到内存，扩机器，带宽飙高，redis 集群开始不稳定。
+
+
+平时在使用 Kafka 吗，具体做哪些业务使用到？
+异步场景，发奖励。
+
+
+为 SELECT e FROM a WHERE b = 1 AND c > 1 ORDER BY d; 建立索引。
+b，c 联合索引。
+
+
+有用过 EXPLAIN 吗，结果中有哪些字段值得关注？
+
+type  是不是 const range 这种比较优秀的
+key 用到了什么索引
+key_len 用到了索引的全部还是部分
+extra 里面是否有 file_sort 这些坏东西，是否有 using index 覆盖索引，using index condition 索引下推。
+
+
+
+30 个并发打印 0-99
+
+ch := make(chan int)
+	go func() {
+		for i := 0; i < 30; i++ {
+			ch <- i
+		}
+	}()
+
+	wg := sync.WaitGroup{}
+	for i := 0; i < 30; i++ {
+		go func() {
+			defer wg.Done()
+			wg.Add(1)
+			fmt.Println(<-ch)
+		}()
+	}
+
+	wg.Wait()
+	
+	
+	
+
+```
+
+
+
+
+
+
+
+
+
   ````
 
   ![](https://cytuchuang-1256930988.cos.ap-shanghai.myqcloud.com/img/20211012202547.png)
@@ -983,207 +2414,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   ```
 
-* go 的 defer， （结合面试题看）
 
-  ```
-  https://segmentfault.com/a/1190000006823652 （核心就是defer 的传入参数是 定义函数的时候决定，defer 内部的时候参数 是执行决定）
-  
-  https://tiancaiamao.gitbooks.io/go-internals/content/zh/03.4.html (这个有个需要注意的是变量的作用域，最近的作用域 ， 比如 for range 中 给 goroutine 添加参数， v:=v 这样)
-  
-  https://learnku.com/articles/42255
-  
-  defer 的执行要学会转换
-  
-  核心
-  
-  1.return 定义的内容 和  函数内部内容是同一个函数空间 （如果定义了返回参数的名称，则这个变量应用空间是整个函数）。 defer 的参数如果是 外部传入的，变量值维持定义时候的状态，但是他也不会影响外部变量的状态。
-  2.return 的赋值先执行，再执行defer ， 再执行 函数结束指令 (return 的执行不是原子性)
-  3. defer 如果是一个方法，那就是匿名方法，匿名方法的变量如果传递进去，就走传递进去的值。 如果是引用外面的，就走实际执行到那会的值。
-  4. fmt.println() 看做一个func 的执行，参数是传进去的
-  ```
-
-  ```
-  example 
-  
-  例1：
-  i := 1
-  defer fmt.Println("Deferred print:", i)
-  i++
-  fmt.Println("Normal print:", i)
-  
-  Normal print: 2
-  Deferred print: 1  // println 传入了函数
-  
-  
-  例2：
-  func main() {
-   var whatever [6]struct{}
-   for i := range whatever {
-    defer func() {
-     fmt.Println(i)
-    }()
-   }
-  }
-  
-  输出
-  5
-  5
-  5
-  5
-  5
-  5
-  
-  
-  例3：
-  func main() {
-   var whatever [6]struct{}
-   for i := range whatever {
-    defer func(i int) {
-     fmt.Println(i)
-    }(i)
-   }
-  }
-  
-  输出
-  5
-  4
-  3
-  2
-  1
-  0
-  
-  
-  例4：
-  func f1() (r int) {
-      r = 1
-      defer func() {
-          r++
-          fmt.Println(r) // 3
-      }()
-      r = 2
-      return
-  }
-  
-  func main() {
-      f1()
-  }
-  
-  
-  例5：
-  
-  func f1() (r int) {
-      defer func() {
-          r++  // go 和 php 不一样，这样不能直接使用，和上面返回的r 是同一个变量
-      }()
-      return 0
-  }
-  func main() {
-      fmt.Println(f1()) // 1
-  }
-  
-  
-  例6：
-  
-  func f() (r int) {
-       t := 5
-       defer func() {
-         t = t + 5 
-       }()
-       return t
-  }
-  
-  输出：
-  5
-  
-  
-  
-  例7：
-  func f() (r int) {
-      defer func(r int) {
-            r = r + 5  // 局部变量
-      }(r)
-      return 1
-  }  // 1
-  
-  
-  例8：
-  
-  type Person struct {
-      age int
-  }
-  
-  func main() {
-      person := &Person{28}
-  
-      // 1. 
-      defer fmt.Println(person.age) // 28
-  
-      // 2.
-      defer func(p *Person) {
-          fmt.Println(p.age)  // 引用传递，执行的时候，值被改变。 29
-      }(person)  
-  
-      // 3.
-      defer func() {
-          fmt.Println(person.age)  // 29
-      }()
-  
-      person.age = 29
-  }
-  
-  
-  例9：
-  
-  type Person struct {
-      age int
-  }
-  
-  func main() {
-      person := &Person{28}
-  
-      // 1.
-      defer fmt.Println(person.age) //28
-  
-      // 2.
-      defer func(p *Person) {
-          fmt.Println(p.age) // 28, 这个地方28很重要，因为 person 的地址被改变了，之前 p 引用类型传进去的地址值还是 28
-      }(person)
-  
-      // 3.
-      defer func() {
-          fmt.Println(person.age) // 29
-      }()
-  
-      person = &Person{29}
-  }
-  
-  例10：
-  
-  很难得一道题
-  func f1(n int) (r int) {
-  	defer func() {
-  		r += n  // 4 + 3 = 7
-  		recover()
-  		fmt.Println(r, n , "---")
-  	}()
-  
-  	var f func()
-  
-  	defer f()
-  	f = func() {
-  		r += 2 // 压根没有执行， 感觉也是因为 defer 传进去的fun 不能被替换
-  		fmt.Println(r, "-==")
-  	}
-  
-  	// r = 3 + 1 = 4
-  	return n + 1
-  }
-  
-  func main() {
-  	fmt.Println(f1(3))
-  }
-  
-  ```
 
   
 
@@ -1465,20 +2696,7 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   
   ```
 
-* new 和 make 的区别
 
-  ```
-  https://sanyuesha.com/2017/07/26/go-make-and-new/
-  
-  都是内存分配。
-  1.make 用在 slice， map， channel， 初始化非零值（nil），返回的就是他们本身 (slice 是本身，map 和 channel 是自身的引用类型)。也只能用在上面三个类型
-  
-  （slice 结构体，平时我们用的时候是指向底层数组第一个元素的指针， map 是 *hmap， channel 是 *hchanel），但会对他们的内部元素进行初始化（上面三个地址类型 零值都是nil）
-  （slice 零值的时候不能 [0] 这样赋值， 但是可以append。 map 因为没有append 的操作，所以啥也不能做， 但是 map 和 slice 都是可以 []int{}, map[string]{} 这样直接给值的。）
-  
-  2.new 是对应类型零值元素的地址。new([]int) , 通过 reflect 可以看到的是 *[]int 类型。 new 用在上面三个类型也不方便，类似地址的地址。 
-  可被替代，能够通过字面值快速初始化。
-  ```
 
 * go 的init 用过么
 
@@ -2617,28 +3835,6 @@ https://blog.csdn.net/love666666shen/article/details/99882528
   // 数组不会rehash ，所以没有什么问题
   ```
 
-* 进程，线程 和 协程的区别
-
-  ```
-  https://zhuanlan.zhihu.com/p/70256971
-  
-  1.进程是程序运行的实体，资源分配的最小单位 (比如限定某个程序最大多少内存)（qq 和 网易云同时 运行）
-  进程拥有自己的资源空间，一个进程包含多个线程，多个线程共享同一个进程的资源
-  
-  2.线程类似于程序中的多个任务，cpu 独立运行和独立调度的最小单位， 内核态 （网易云 播放歌曲 和 歌词滚动同时运行）
-  cpu 上跑的任务是线程
-  
-  
-  3.协程 ,用户态线程，占用内存小，kb，可以自动扩容，  线程栈 几mb, 线程是cpu 调度， goroutine 是 go runtime 进行调度
-  对于cpu 来说，他是不知道协程的存在的。
-  
-  4.协程进行切换代价比线程小。
-  
-  为什么协程切换代价比线程切换代价小？
-  1.协程间任务的切换发生在用户态，程序控制，资源消耗小。线程的切换发生在内核态，所以需要用户态到内核态的切换， 再内核态到用户态切换。
-  2、而且对于多核情况下，如果协程的切换都发生在一个cpu 上执行，线程的切换在多个cpu上执行， 消耗大。（协程间不需要加锁，因为本质上协程是在一个线程中切换的）https://www.v2ex.com/t/387596​， 协程不用加锁的解释，少场景 （这是以前刚写go 的时候内心os, 协程不用加锁， 但不代表他执行的 内容不用加锁）
-  3.协程的切换只需要把 cpu 的寄存器上内容切换到上次执行的地方，线程包含的资源更多，比如协程切换不用管线程共享的栈内存，但线程间切换就得管。
-  ```
 
 * go 协程调度
 
@@ -3605,3 +4801,89 @@ func Print()  error {
 
   
 
+* ```
+  go 中 i++ 是语句，不能直接用来进行赋值
+  
+  c[i++]
+  //  不能这样使用，得分成 2步，如下
+  
+  i++
+  c[i]
+  ```
+
+* ```
+  常量和 函数参数未使用，在 go 中是可以被允许的
+  ```
+
+* ```
+  const (
+      x uint16 = 120
+      y
+      s = "abc"
+      z
+      w = iota
+      ww
+  )
+  
+  fmt.Println(y,z, w, ww)
+  
+  // 120  abc  4 5
+  // iota 才会递增， 别的不会
+  // const 里面除了记录iota 还可以用常量 数值
+  ```
+
+* ```
+  func main() {
+      m := make(map[string]int,2)
+      cap(m) 
+  }
+  
+  
+  使用 cap() 获取 map 的容量。1.使用 make 创建 map 变量时可以指定第二个参数，不过会被忽略。2.cap() 函数适用于数组、数组指针、slice 和 channel，不适用于 map，可以使用 len() 返回 map 的元素个数。
+  
+  cap 代表能存储的元素， slice 和 channel 都可以。感觉map 有点特殊，因为 bucket 下面能存储多个元素
+  
+  len代表其中的元素，slice， channel， map 都可以。
+  ```
+
+* ```
+  var c error
+   c = errors.New("11")
+  
+   c1, cok := c.(interface{})
+  
+   fmt.Println(cok)
+   fmt.Println(reflect.TypeOf(c1).Name())
+   
+   今天遇到断言的一个小问题。 interface 再断言成 interface 。其实是可以的，不会报错， ok 那边代表的是但凡有实体type 类型，返回的就是true， 否则就是 false。
+  ```
+
+* ```
+  import (  
+     _ "fmt"
+      "log"
+      "time"
+  )
+  var _ = log.Println
+  func main() {  
+      _ = time.Now
+  }
+  
+  go中对于未使用，但需要引入场景的修改。
+  
+  _ 占位
+  ```
+
+* ```
+  var x = []int{2: 2, 3, 0: 1}
+  
+  func main() {
+      fmt.Println(x)
+  }
+  
+  [1 0 2 3]，字面量初始化切片时候，可以指定索引，没有指定索引的元素会在前一个索引基础之上加一，所以输出[1 0 2 3]
+  
+  // []int{2: 2, 3, 3: 1} 这样会报错，输出 Duplicate index
+  ```
+
+  
